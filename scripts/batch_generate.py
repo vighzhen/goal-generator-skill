@@ -101,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     start_time = time.perf_counter()
     try:
         tasks = _load_tasks(_input_path_from_args(args))
+        tasks = _filter_tasks(tasks, args.filter)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
@@ -122,6 +123,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
+    parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
@@ -134,6 +136,20 @@ def _input_path_from_args(args: argparse.Namespace) -> Path:
     if not input_value:
         raise ValueError("必须提供 --input 或位置输入文件路径")
     return Path(input_value)
+
+
+def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
+    if not pattern:
+        return tasks
+    try:
+        matcher = re.compile(pattern)
+    except re.error as error:
+        raise ValueError(f"--filter 不是有效正则：{error}") from error
+    return [task for task in tasks if _task_matches_filter(task, matcher)]
+
+
+def _task_matches_filter(task: TaskSpec, matcher: re.Pattern[str]) -> bool:
+    return bool(matcher.search(task.name) or matcher.search(task.description))
 
 
 def _load_tasks(input_path: Path) -> list[TaskSpec]:
