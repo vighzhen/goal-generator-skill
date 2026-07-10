@@ -21,7 +21,7 @@ from generate_goal import (
     render_goal_text,
 )
 
-SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".csv", ".md", ".markdown")
+SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".jsonl", ".csv", ".md", ".markdown")
 SLUG_MAX_LENGTH = 50
 DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
     parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
-    parser.add_argument("--input", help="输入文件路径，支持 .json、.csv、.md 或 .markdown。")
+    parser.add_argument("--input", help="输入文件路径，支持 .json、.jsonl、.csv、.md 或 .markdown。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
@@ -140,6 +140,8 @@ def _load_tasks(input_path: Path) -> list[TaskSpec]:
     suffix = input_path.suffix.lower()
     if suffix == ".json":
         return _load_json_tasks(input_path)
+    if suffix == ".jsonl":
+        return _load_jsonl_tasks(input_path)
     if suffix == ".csv":
         return _load_csv_tasks(input_path)
     if suffix in {".md", ".markdown"}:
@@ -166,6 +168,28 @@ def _task_from_json_item(item: dict[str, Any], index: int) -> TaskSpec:
     description = _string_value(item.get("description"))
     fields = _fields_from_mapping(item.get("fields"))
     return TaskSpec(name=name, description=description, fields=fields)
+
+
+def _load_jsonl_tasks(input_path: Path) -> list[TaskSpec]:
+    tasks: list[TaskSpec] = []
+    for line_number, line in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        tasks.append(_task_from_jsonl_line(stripped, line_number, len(tasks) + 1))
+    if not tasks:
+        raise ValueError("JSONL 文件没有可读取的任务行")
+    return tasks
+
+
+def _task_from_jsonl_line(line: str, line_number: int, task_index: int) -> TaskSpec:
+    try:
+        item = json.loads(line)
+    except json.JSONDecodeError as error:
+        return _invalid_task(task_index, f"line-{line_number}", f"JSONL 第 {line_number} 行解析失败：{error.msg}")
+    if not isinstance(item, dict):
+        return _invalid_task(task_index, f"line-{line_number}", f"JSONL 第 {line_number} 行必须是对象")
+    return _task_from_json_item(item, task_index)
 
 
 def _load_csv_tasks(input_path: Path) -> list[TaskSpec]:

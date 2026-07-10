@@ -12,6 +12,7 @@ goal-generator-skill/
 │   └── batch_generate.py
 ├── examples/
 │   ├── sample_tasks.json
+│   ├── sample_tasks.jsonl
 │   ├── sample_tasks.csv
 │   └── sample_tasks.md
 ├── references/
@@ -91,7 +92,7 @@ python3 scripts/generate_goal.py --interactive
 
 ### 批量生成
 
-当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON、CSV 或 Markdown 表格读取任务列表。
+当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON、JSONL、CSV 或 Markdown 表格读取任务列表。
 
 JSON 输入格式：
 
@@ -106,6 +107,13 @@ JSON 输入格式：
     }
   }
 ]
+```
+
+JSONL 输入格式适合流水线或脚本逐行追加任务，每行一个 JSON 对象：
+
+```jsonl
+{"name":"登录接口Bug修复","description":"修复登录 API 在空 token 场景下偶发 500 的问题","fields":{}}
+{"name":"服务层单元测试","description":"为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q","fields":{"constraints":"不改业务逻辑"}}
 ```
 
 CSV 输入格式包含以下表头：
@@ -130,6 +138,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run
 
 # 从 JSON 批量生成并输出到控制台
 python3 scripts/batch_generate.py --input examples/sample_tasks.json
+
+# 从 JSONL 批量分析，适合脚本或流水线逐行生成任务
+python3 scripts/batch_generate.py --input examples/sample_tasks.jsonl --dry-run
 
 # 从 CSV 批量分析，适合用 Excel 编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
@@ -170,7 +181,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量 Bug 修复
 - 代码迁移/升级
 - 文档生成
-- 批量任务指令生成（JSON、CSV、Markdown 表格）
+- 批量任务指令生成（JSON、JSONL、CSV、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件
