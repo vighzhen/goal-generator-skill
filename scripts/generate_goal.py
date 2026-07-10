@@ -596,6 +596,10 @@ def main(argv: list[str] | None = None) -> int:
             validation = validate_fields_json_file(args.validate_fields_json)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
+        if args.lint_fields_json:
+            lint_report = lint_fields_json_file(args.lint_fields_json)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.generate:
             _emit_output(render_goal_text(_goal_from_args(args)), args.output_file)
             return 0
@@ -625,6 +629,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
+    parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
@@ -678,6 +683,175 @@ def validate_fields_json_file(fields_file: str) -> dict[str, object]:
     fields_path = Path(fields_file)
     data = json.loads(fields_path.read_text(encoding="utf-8"))
     return validate_fields_json_data(data, str(fields_path))
+
+
+def lint_fields_json_file(fields_file: str) -> dict[str, object]:
+    """检查 6 要素 JSON 的语义质量，而不只检查结构完整性。"""
+    fields_path = Path(fields_file)
+    data = json.loads(fields_path.read_text(encoding="utf-8"))
+    return lint_fields_json_data(data, str(fields_path))
+
+
+def lint_fields_json_data(data: object, source: str = "") -> dict[str, object]:
+    """对直接字段对象或 fields 包装对象做语义质量检查。"""
+    validation = validate_fields_json_data(data, source)
+    fields = _lintable_fields_from_data(data)
+    issues = _validation_lint_issues(validation)
+    for key in ELEMENT_ORDER:
+        issues.extend(_semantic_lint_issues(key, fields.get(key, "")))
+    score = _lint_score(issues)
+    high_issue_count = sum(1 for issue in issues if issue["severity"] == "high")
+    passed = bool(validation["valid"]) and high_issue_count == 0 and score >= 80
+    return {
+        "passed": passed,
+        "source": source,
+        "score": score,
+        "issue_count": len(issues),
+        "high_issue_count": high_issue_count,
+        "issues": issues,
+        "validation": validation,
+        "summary": _lint_summary(passed, score, issues),
+    }
+
+
+def _lintable_fields_from_data(data: object) -> dict[str, str]:
+    if not isinstance(data, dict):
+        return {}
+    raw_fields = data.get("fields", data)
+    if not isinstance(raw_fields, dict):
+        return {}
+    return {
+        key: str(raw_fields.get(key)).strip()
+        for key in ELEMENT_ORDER
+        if raw_fields.get(key) is not None and str(raw_fields.get(key)).strip()
+    }
+
+
+def _validation_lint_issues(validation: dict[str, object]) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for key in _object_list(validation.get("missing_fields")):
+        issues.append(_lint_issue(key, "high", "缺少必填要素", f"补齐 {ELEMENT_LABELS[key]} 后再生成 /goal。"))
+    for key in _object_list(validation.get("empty_fields")):
+        issues.append(_lint_issue(key, "high", "要素为空", f"为 {ELEMENT_LABELS[key]} 填写非空内容。"))
+    unknown_fields = _object_list(validation.get("unknown_fields"))
+    if unknown_fields:
+        issues.append(_lint_issue("fields", "medium", f"存在未知字段：{'、'.join(unknown_fields)}", "移除未知字段或放入元数据对象。"))
+    return issues
+
+
+def _semantic_lint_issues(key: str, value: str) -> list[dict[str, str]]:
+    if not value:
+        return []
+    if key == "outcome":
+        return _outcome_lint_issues(value)
+    if key == "verification":
+        return _verification_lint_issues(value)
+    if key == "constraints":
+        return _constraints_lint_issues(value)
+    if key == "boundaries":
+        return _boundaries_lint_issues(value)
+    if key == "iteration":
+        return _iteration_lint_issues(value)
+    if key == "blocked":
+        return _blocked_lint_issues(value)
+    return []
+
+
+def _outcome_lint_issues(value: str) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    lowered_value = value.lower()
+    if len(value) < 12:
+        issues.append(_lint_issue("outcome", "medium", "目标结果过短", "补充交付物、作用范围、数量或完成标准。"))
+    if _contains_any(lowered_value, ("优化一下", "处理一下", "修一下", "improve it", "fix it")):
+        issues.append(_lint_issue("outcome", "high", "目标结果过于泛化", "改成可验收的交付物，例如文件、模块、数量或用户可见行为。"))
+    if not _has_specific_signal(value):
+        issues.append(_lint_issue("outcome", "medium", "缺少可验收对象", "补充路径、模块、接口、报告、数量或覆盖范围。"))
+    return issues
+
+
+def _verification_lint_issues(value: str) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    lowered_value = value.lower()
+    if _contains_any(lowered_value, ("确保没问题", "验证通过", "测试通过", "make sure", "ensure it works")):
+        issues.append(_lint_issue("verification", "medium", "验证方式偏主观", "写出具体命令、检查点或可保存证据。"))
+    if not _has_command_signal(value):
+        issues.append(_lint_issue("verification", "high", "缺少具体验证命令或证据", "至少补充一个测试、编译、lint、构建或人工检查证据。"))
+    return issues
+
+
+def _constraints_lint_issues(value: str) -> list[dict[str, str]]:
+    lowered_value = value.lower()
+    if _contains_any(lowered_value, ("小心", "不要乱改", "保持稳定", "be careful", "keep stable")):
+        return [_lint_issue("constraints", "medium", "约束过于笼统", "明确不能改的行为、依赖、API、数据或文件范围。")]
+    if not _contains_any(lowered_value, CONSTRAINT_KEYWORDS):
+        return [_lint_issue("constraints", "medium", "约束缺少明确禁止或保持项", "加入“不改/不引入/保持兼容”等可执行约束。")]
+    return []
+
+
+def _boundaries_lint_issues(value: str) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    lowered_value = value.lower()
+    if _contains_any(lowered_value, ("相关", "附近", "整个项目", "全项目", "wherever", "related files")):
+        issues.append(_lint_issue("boundaries", "medium", "边界可能过宽或模糊", "列出包含目录/文件，并说明排除范围。"))
+    if not (PATH_PATTERN.search(value) or _contains_any(lowered_value, ("仅", "只", "范围", "only", "scope", "within"))):
+        issues.append(_lint_issue("boundaries", "high", "缺少明确范围信号", "补充具体目录、文件、模块或明确包含/排除范围。"))
+    return issues
+
+
+def _iteration_lint_issues(value: str) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    lowered_value = value.lower()
+    if "commit" not in lowered_value and "提交" not in lowered_value:
+        issues.append(_lint_issue("iteration", "high", "缺少提交节奏", "说明每个独立改动验证后单独 commit。"))
+    if not _contains_any(lowered_value, ("每个", "每次", "逐个", "分批", "each", "per", "batch")):
+        issues.append(_lint_issue("iteration", "medium", "缺少迭代粒度", "说明按文件、模块、接口或问题分批推进。"))
+    return issues
+
+
+def _blocked_lint_issues(value: str) -> list[dict[str, str]]:
+    lowered_value = value.lower()
+    if _contains_any(lowered_value, ("有问题就问", "遇到困难再说", "ask if needed", "if any issue")):
+        return [_lint_issue("blocked", "medium", "受阻条件过于泛化", "明确哪些情况必须停下，哪些情况可跳过以及记录要求。")]
+    if not _contains_any(lowered_value, BLOCKED_KEYWORDS):
+        return [_lint_issue("blocked", "medium", "缺少停下或跳过条件", "补充必须问人、允许跳过或不可自行决策的条件。")]
+    return []
+
+
+def _has_specific_signal(value: str) -> bool:
+    lowered_value = value.lower()
+    return (
+        bool(PATH_PATTERN.search(value))
+        or bool(NUMBER_PATTERN.search(value))
+        or _contains_any(lowered_value, SPECIFICITY_KEYWORDS)
+    )
+
+
+def _has_command_signal(value: str) -> bool:
+    lowered_value = value.lower()
+    command_pattern = re.compile(r"\b(?:python3?|pytest|unittest|npm|pnpm|yarn|go|cargo|make|uv|ruff|mypy|tsc)\b")
+    return bool(command_pattern.search(lowered_value)) or _contains_any(lowered_value, ("运行", "执行", "检查", "人工检查", "报告审计"))
+
+
+def _lint_issue(element: str, severity: str, message: str, suggestion: str) -> dict[str, str]:
+    label = ELEMENT_LABELS.get(element, element)
+    return {"element": element, "label": label, "severity": severity, "message": message, "suggestion": suggestion}
+
+
+def _object_list(value: object) -> list[str]:
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _lint_score(issues: list[dict[str, str]]) -> int:
+    penalties = {"high": 20, "medium": 10, "low": 5}
+    total_penalty = sum(penalties.get(issue.get("severity", "low"), 5) for issue in issues)
+    return max(0, 100 - total_penalty)
+
+
+def _lint_summary(passed: bool, score: int, issues: list[dict[str, str]]) -> str:
+    if passed:
+        return f"语义质量检查通过，得分 {score}。"
+    high_count = sum(1 for issue in issues if issue["severity"] == "high")
+    return f"语义质量检查未通过，得分 {score}，高优先级问题 {high_count} 个。"
 
 
 def validate_fields_json_data(data: object, source: str = "") -> dict[str, object]:

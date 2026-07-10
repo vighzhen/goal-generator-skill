@@ -154,6 +154,16 @@ python3 scripts/generate_goal.py --validate-fields-json goal_fields.json
 
 命令支持直接字段对象，也支持 `{ "fields": { ... } }` 包装结构；校验通过时退出码为 0，否则退出码为 1 并输出修复建议。
 
+### 检查 6 要素语义质量
+
+字段 JSON 结构完整不代表内容足够好。使用 `--lint-fields-json` 检查字段是否过短、过泛，验证方式是否有具体命令或证据，边界是否明确，迭代和受阻条件是否可执行：
+
+```bash
+python3 scripts/generate_goal.py --lint-fields-json goal_fields.json
+```
+
+命令输出 `score`、`issues`、`summary` 和原始结构校验结果；存在高优先级问题或得分低于门槛时退出码为 1，适合作为 `--generate --from-json` 前的质量门禁。
+
 ### 校验已有 /goal 文件
 
 如果 `/goal` 指令经过手工编辑、复制或批量拼接，可以用 `--validate-goal-file` 检查分隔线、5 段结构和 6 要素提示是否完整：
@@ -298,6 +308,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 已有 `/goal` 文件结构校验
 - 一键生成可复制的缺失要素追问文案
 - 原始需求与补充回答合并为 6 要素字段草稿
+- 单任务 6 要素字段语义质量检查和生成前门禁
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
