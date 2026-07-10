@@ -262,6 +262,41 @@ GOAL_ELEMENT_CUES: dict[str, str] = {
     "iteration": "迭代策略为：",
     "blocked": "受阻停止条件为：",
 }
+SENSITIVE_VALUE_PATTERNS: tuple[tuple[str, str, str, re.Pattern[str]], ...] = (
+    (
+        "private_key",
+        "critical",
+        "疑似私钥块，必须移除或替换为占位符后再共享",
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.IGNORECASE | re.DOTALL),
+    ),
+    (
+        "secret_assignment",
+        "high",
+        "疑似 token/key/password 赋值，建议改成 <SECRET> 占位符",
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|token|secret|password|passwd|access[_-]?token|auth[_-]?token)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=:@-]{8,}",
+        ),
+    ),
+    (
+        "bearer_token",
+        "high",
+        "疑似 Bearer token，建议删除认证头或替换为 <TOKEN>",
+        re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{10,}"),
+    ),
+    (
+        "url",
+        "medium",
+        "包含 URL，若为内网、工单、仓库或带参数链接，建议确认可共享或脱敏",
+        re.compile(r"https?://[^\s)>\]\"]+"),
+    ),
+    (
+        "email",
+        "medium",
+        "包含邮箱地址，建议确认是否可共享或替换为联系人角色",
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    ),
+)
+SENSITIVE_SEVERITY_SCORES: dict[str, int] = {"critical": 70, "high": 40, "medium": 20, "low": 10}
 
 
 class Question(TypedDict):
@@ -378,6 +413,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.goal_json:
             _emit_output(json.dumps(build_goal_json_draft(args.goal_json), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.redaction_check:
+            _emit_output(json.dumps(check_redaction(args.redaction_check), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.risk_card:
             _emit_output(format_risk_card(args.risk_card), args.output_file)
             return 0
@@ -432,6 +470,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
     parser.add_argument("--goal-json", help="生成面向 IDE、机器人或流水线的 Goal JSON 草稿，包含 6 要素、复核状态、校验结果和下一步命令。")
+    parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
     parser.add_argument("--risk-card", help="生成单任务 Markdown 风险卡片，汇总风险因素、复杂度和缓解建议。")
     parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
@@ -487,6 +526,7 @@ def build_capabilities() -> dict[str, object]:
                 "--score",
                 "--compare",
                 "--goal-json",
+                "--redaction-check",
                 "--risk-card",
                 "--review-card",
                 "--questions-json",
@@ -579,6 +619,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成 Goal JSON 草稿",
                 "scenario": "IDE、机器人或流水线需要一次拿到可编辑 6 要素、人工复核状态、校验结果和下一步命令。",
                 "command": "python3 scripts/generate_goal.py --goal-json '给项目加单元测试'",
+            },
+            {
+                "name": "检查敏感信息",
+                "scenario": "把任务描述分享给机器人、Issue 或外部系统前，先发现 token、邮箱、URL 等可能需要脱敏的内容。",
+                "command": "python3 scripts/generate_goal.py --redaction-check '修复登录问题，token=abcdef1234567890，联系 owner@example.com'",
             },
             {
                 "name": "生成 Markdown 评审卡片",
@@ -1080,6 +1125,94 @@ def _goal_json_recommended_commands(review_required: list[str]) -> dict[str, str
         "validate": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
         "generate": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
     }
+
+
+def check_redaction(description: str) -> dict[str, object]:
+    """检查任务描述中可能需要脱敏的敏感片段。"""
+    if not description.strip():
+        raise ValueError("--redaction-check 不能为空，请提供任务描述")
+    findings = _sensitive_findings(description)
+    risk_score = _redaction_risk_score(findings)
+    risk_level = _redaction_risk_level(risk_score, findings)
+    return {
+        "safe_to_share": not findings,
+        "risk_level": risk_level,
+        "risk_score": risk_score,
+        "finding_count": len(findings),
+        "finding_types": _finding_types(findings),
+        "findings": findings,
+        "redacted_preview": _normalize_text(_redact_sensitive_text(description, findings))[:TEXT_PREVIEW_LENGTH],
+        "recommended_action": _redaction_recommended_action(risk_level, findings),
+    }
+
+
+def _sensitive_findings(text: str) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    occupied_spans: list[tuple[int, int]] = []
+    for kind, severity, recommendation, pattern in SENSITIVE_VALUE_PATTERNS:
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if _span_overlaps(start, end, occupied_spans):
+                continue
+            occupied_spans.append((start, end))
+            findings.append(
+                {
+                    "type": kind,
+                    "severity": severity,
+                    "start": start,
+                    "end": end,
+                    "preview": _mask_sensitive_value(match.group(0)),
+                    "recommendation": recommendation,
+                }
+            )
+    return sorted(findings, key=lambda item: int(item["start"]))
+
+
+def _span_overlaps(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start < span_end and end > span_start for span_start, span_end in spans)
+
+
+def _mask_sensitive_value(value: str) -> str:
+    normalized = _normalize_text(value)
+    if len(normalized) <= 8:
+        return "***"
+    return f"{normalized[:4]}***{normalized[-4:]}"
+
+
+def _redact_sensitive_text(text: str, findings: list[dict[str, object]]) -> str:
+    redacted = text
+    for finding in sorted(findings, key=lambda item: int(item["start"]), reverse=True):
+        start = int(finding["start"])
+        end = int(finding["end"])
+        redacted = f"{redacted[:start]}[REDACTED:{finding['type']}]{redacted[end:]}"
+    return redacted
+
+
+def _redaction_risk_score(findings: list[dict[str, object]]) -> int:
+    score = sum(SENSITIVE_SEVERITY_SCORES.get(str(finding.get("severity", "low")), 10) for finding in findings)
+    return min(score, 100)
+
+
+def _redaction_risk_level(risk_score: int, findings: list[dict[str, object]]) -> str:
+    if any(finding.get("severity") == "critical" for finding in findings) or risk_score >= 70:
+        return "high"
+    if risk_score >= 30:
+        return "medium"
+    if findings:
+        return "low"
+    return "none"
+
+
+def _finding_types(findings: list[dict[str, object]]) -> list[str]:
+    return sorted({str(finding.get("type", "unknown")) for finding in findings})
+
+
+def _redaction_recommended_action(risk_level: str, findings: list[dict[str, object]]) -> str:
+    if not findings:
+        return "未发现明显敏感片段，可继续复核 6 要素后共享。"
+    if risk_level == "high":
+        return "共享前必须移除或替换所有 high/critical 敏感片段，并重新运行 --redaction-check。"
+    return "共享前建议确认发现项是否可公开；不能公开时使用 redacted_preview 或占位符替换。"
 
 
 def format_review_card(description: str) -> str:
