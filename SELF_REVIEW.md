@@ -245,12 +245,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 标准输入任务流 | CI 或脚本常通过管道临时生成 JSONL/JSON 内容，不想落盘成临时文件；当前 batch 必须读取文件路径。 | 在 batch_generate.py 支持 `--input -` 或位置参数 `-` 从 stdin 读取，并用 `--stdin-format json/jsonl` 指定格式。 | 已实现 | 待提交 |
-| 2 | 能力清单输出 | Skill 能力已快速增长，用户和集成脚本难以发现所有输入格式、选项和模板；当前只能读 README。 | 在 generate_goal.py 新增 --capabilities，输出支持的单任务能力、批量格式、批量选项和模板列表 JSON。 | 已实现 | 待提交 |
+| 1 | 标准输入任务流 | CI 或脚本常通过管道临时生成 JSONL/JSON 内容，不想落盘成临时文件；当前 batch 必须读取文件路径。 | 在 batch_generate.py 支持 `--input -` 或位置参数 `-` 从 stdin 读取，并用 `--stdin-format json/jsonl` 指定格式。 | 已实现 | 0dc0733 |
+| 2 | 能力清单输出 | Skill 能力已快速增长，用户和集成脚本难以发现所有输入格式、选项和模板；当前只能读 README。 | 在 generate_goal.py 新增 --capabilities，输出支持的单任务能力、批量格式、批量选项和模板列表 JSON。 | 已实现 | 580c6b4 |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
