@@ -151,6 +151,14 @@ class TaskRedactionSummary:
 
 
 @dataclass(frozen=True)
+class TaskReadinessSummary:
+    task: TaskSpec
+    score: dict[str, object]
+    profile: dict[str, object]
+    element_statuses: dict[str, str]
+
+
+@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -179,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.draft_jsonl:
         return _run_draft_jsonl_mode(tasks, args)
+    if args.readiness_matrix_md:
+        return _run_readiness_matrix_mode(tasks, args)
     if args.redaction_report_md:
         return _run_redaction_report_mode(tasks, args)
     if args.questions_md:
@@ -259,6 +269,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions-md", help="把每个任务可直接发送给需求方的缺失要素追问写入 Markdown 包。")
     parser.add_argument("--redaction-report-md", help="把批量任务中的敏感信息发现、脱敏预览和处理建议写入 Markdown 报告。")
     parser.add_argument("--draft-jsonl", help="把每个任务的 Goal JSON 草稿写入单个 JSONL 文件，适合流水线逐行消费。")
+    parser.add_argument("--readiness-matrix-md", help="把批量任务可执行度、风险和 6 要素状态写入 Markdown 就绪度矩阵。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
@@ -513,6 +524,23 @@ def _run_redaction_report_mode(tasks: list[TaskSpec], args: argparse.Namespace) 
     return 0
 
 
+def _run_readiness_matrix_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
+    start_time = time.perf_counter()
+    readiness_summaries, skipped_tasks = _build_readiness_summaries(tasks, args.dedupe)
+    stats = BatchStats(len(readiness_summaries), len(skipped_tasks), time.perf_counter() - start_time)
+    matrix_path = Path(args.readiness_matrix_md)
+    _write_readiness_matrix_markdown(readiness_summaries, skipped_tasks, stats, matrix_path)
+    if args.report_json:
+        _write_readiness_matrix_report(readiness_summaries, skipped_tasks, stats, Path(args.report_json))
+    if not args.summary_only:
+        print(f"已写入就绪度矩阵：{matrix_path}")
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
 def _build_redaction_summaries(
     tasks: list[TaskSpec],
     dedupe: bool,
@@ -534,6 +562,58 @@ def _build_redaction_summaries(
             continue
         summaries.append(TaskRedactionSummary(task, check_redaction(task.description)))
     return summaries, skipped_tasks
+
+
+def _build_readiness_summaries(
+    tasks: list[TaskSpec],
+    dedupe: bool,
+) -> tuple[list[TaskReadinessSummary], list[SkippedTask]]:
+    summaries: list[TaskReadinessSummary] = []
+    skipped_tasks: list[SkippedTask] = []
+    seen_task_keys: set[str] = set()
+    for task in tasks:
+        if dedupe and _is_duplicate_task(task, seen_task_keys):
+            reason = "重复任务：任务名和描述已出现过"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        if task.load_error:
+            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
+            continue
+        if not task.description:
+            reason = "缺少 description"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        analysis_text = _task_analysis_text(task)
+        summaries.append(
+            TaskReadinessSummary(
+                task=task,
+                score=score_description(analysis_text),
+                profile=build_task_profile(analysis_text),
+                element_statuses=_task_element_statuses(task),
+            )
+        )
+    return summaries, skipped_tasks
+
+
+def _task_analysis_text(task: TaskSpec) -> str:
+    if not task.fields:
+        return task.description
+    field_lines = [f"{ELEMENT_LABELS[key]}：{value}" for key, value in task.fields.items() if key in ELEMENT_ORDER and value]
+    return "\n".join([task.description, *field_lines])
+
+
+def _task_element_statuses(task: TaskSpec) -> dict[str, str]:
+    analysis = analyze_description(task.description)
+    present = analysis["present"]
+    statuses: dict[str, str] = {}
+    for key in ELEMENT_ORDER:
+        if task.fields.get(key):
+            statuses[key] = "input"
+        elif key in present:
+            statuses[key] = "detected"
+        else:
+            statuses[key] = "missing"
+    return statuses
 
 
 def _write_draft_jsonl(
@@ -1703,6 +1783,42 @@ def _write_redaction_summary_report(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_readiness_matrix_report(
+    readiness_summaries: list[TaskReadinessSummary],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "ready_count": sum(1 for summary in readiness_summaries if _readiness_summary_ready(summary)),
+        "needs_information_count": sum(1 for summary in readiness_summaries if _readiness_missing_keys(summary)),
+        "tasks": [_readiness_matrix_report_item(summary) for summary in readiness_summaries],
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _readiness_matrix_report_item(summary: TaskReadinessSummary) -> dict[str, object]:
+    return {
+        "name": summary.task.name,
+        "description": summary.task.description,
+        "readiness_score": summary.score.get("readiness_score", 0),
+        "readiness_level": summary.score.get("readiness_level", "unknown"),
+        "risk_level": summary.score.get("risk_level", "unknown"),
+        "risk_score": summary.score.get("risk_score", 0),
+        "task_type": summary.score.get("task_type", {}),
+        "element_statuses": summary.element_statuses,
+        "missing": _readiness_missing_keys(summary),
+        "ready_to_generate": _readiness_summary_ready(summary),
+        "next_action": summary.score.get("next_action", ""),
+        "recommended_command": summary.score.get("recommended_command", ""),
+    }
+
+
 def _draft_jsonl_report_item(draft: GoalJsonDraft) -> dict[str, object]:
     payload = draft.draft
     return {
@@ -1853,6 +1969,84 @@ def _write_redaction_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _write_readiness_matrix_markdown(
+    readiness_summaries: list[TaskReadinessSummary],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    matrix_path: Path,
+) -> None:
+    matrix_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_count = sum(1 for summary in readiness_summaries if _readiness_summary_ready(summary))
+    needs_information_count = sum(1 for summary in readiness_summaries if _readiness_missing_keys(summary))
+    lines = [
+        "# Batch Goal Readiness Matrix",
+        "",
+        f"- 可评审任务：{stats.success_count}",
+        f"- 可直接生成：{ready_count}",
+        f"- 需补信息：{needs_information_count}",
+        f"- 跳过任务：{stats.skipped_count}",
+        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
+        "",
+        "## 矩阵",
+        "",
+    ]
+    lines.extend(_readiness_matrix_table(readiness_summaries))
+    lines.extend(["", "## 图例", ""])
+    lines.extend(
+        [
+            "- ✅ 输入：批量任务 fields 中显式提供。",
+            "- ✅ 识别：从 description 中自动识别到相关要素。",
+            "- ⚠️ 缺失：未在 fields 或 description 中发现，生成前应补齐或复核默认值。",
+        ]
+    )
+    lines.extend(["", "## 跳过任务", ""])
+    lines.extend(_markdown_skipped_table(skipped_tasks))
+    matrix_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _readiness_matrix_table(readiness_summaries: list[TaskReadinessSummary]) -> list[str]:
+    if not readiness_summaries:
+        return ["无可评审任务。"]
+    lines = [
+        "| 任务 | 分数 | 等级 | 风险 | Outcome | Verification | Constraints | Boundaries | Iteration | Blocked | 下一步 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for summary in readiness_summaries:
+        score = summary.score
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(summary.task.name),
+                    _markdown_cell(str(score.get("readiness_score", ""))),
+                    _markdown_cell(str(score.get("readiness_level", "unknown"))),
+                    _markdown_cell(f"{score.get('risk_level', 'unknown')}({score.get('risk_score', '')})"),
+                    *[_markdown_cell(_readiness_status_cell(summary.element_statuses.get(key, "missing"))) for key in ELEMENT_ORDER],
+                    _markdown_cell(str(score.get("next_action", ""))),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _readiness_status_cell(status: str) -> str:
+    labels = {
+        "input": "✅ 输入",
+        "detected": "✅ 识别",
+        "missing": "⚠️ 缺失",
+    }
+    return labels.get(status, "⚠️ 缺失")
+
+
+def _readiness_missing_keys(summary: TaskReadinessSummary) -> list[str]:
+    return [key for key in ELEMENT_ORDER if summary.element_statuses.get(key) == "missing"]
+
+
+def _readiness_summary_ready(summary: TaskReadinessSummary) -> bool:
+    return not _readiness_missing_keys(summary) and summary.score.get("readiness_level") == "ready"
 
 
 def _redaction_report_table(redaction_summaries: list[TaskRedactionSummary]) -> list[str]:

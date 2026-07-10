@@ -571,6 +571,7 @@ def build_capabilities() -> dict[str, object]:
                 "--questions-md",
                 "--redaction-report-md",
                 "--draft-jsonl",
+                "--readiness-matrix-md",
                 "--fail-below-score",
                 "--export-fields-json",
                 "--dedupe",
@@ -737,6 +738,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量敏感信息报告",
                 "scenario": "团队分发批量任务清单前，先审计哪些任务含 token、邮箱、URL 等需要脱敏的片段。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --redaction-report-md redaction_report.md",
+            },
+            {
+                "name": "批量就绪度矩阵",
+                "scenario": "团队希望用一张表横向查看每个任务 6 要素状态、可执行度、风险和下一步动作。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --readiness-matrix-md readiness_matrix.md",
             },
             {
                 "name": "批量 Goal JSONL 草稿",
