@@ -19,6 +19,7 @@ from generate_goal import (
     _GoalFields,
     _extract_labeled_fields,
     analyze_description,
+    build_task_profile,
     render_goal_text,
 )
 
@@ -77,6 +78,7 @@ class PreparedTask:
 @dataclass(frozen=True)
 class TaskOutput:
     task_name: str
+    task_description: str
     content: str
     file_slug: str
     present_keys: list[str]
@@ -134,7 +136,15 @@ def main(argv: list[str] | None = None) -> int:
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
     if args.report_json:
-        _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json), args.output_dir, args.output_file)
+        _write_report_json(
+            outputs,
+            skipped_tasks,
+            stats,
+            Path(args.report_json),
+            args.output_dir,
+            args.output_file,
+            args.include_profile,
+        )
     print(_format_summary(stats))
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -151,6 +161,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
+    parser.add_argument("--include-profile", action="store_true", help="在 JSON 报告中附加任务类型、风险评分和追问策略画像。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
@@ -225,7 +236,7 @@ def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int
         print("\n".join(f"{index}. {task.name}" for index, task in enumerate(listed_tasks, start=1)))
     stats = BatchStats(len(listed_tasks), len(skipped_tasks), time.perf_counter() - start_time)
     if args.report_json:
-        _write_task_list_report(listed_tasks, skipped_tasks, stats, Path(args.report_json))
+        _write_task_list_report(listed_tasks, skipped_tasks, stats, Path(args.report_json), args.include_profile)
     print(_format_summary(stats))
     fail_on_skipped = args.fail_on_skipped or args.check
     if fail_on_skipped and stats.skipped_count:
@@ -599,6 +610,7 @@ def _process_one_task(
         _print_verbose(prepared, slug)
     return TaskOutput(
         task_name=task.name,
+        task_description=task.description,
         content=content,
         file_slug=slug,
         present_keys=prepared.present_keys,
@@ -757,13 +769,14 @@ def _write_report_json(
     report_path: Path,
     output_dir: str | None,
     output_file: str | None,
+    include_profile: bool = False,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "success_count": stats.success_count,
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "tasks": [_task_report(output, output_dir, output_file) for output in outputs],
+        "tasks": [_task_report(output, output_dir, output_file, include_profile) for output in outputs],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -774,20 +787,33 @@ def _write_task_list_report(
     skipped_tasks: list[SkippedTask],
     stats: BatchStats,
     report_path: Path,
+    include_profile: bool = False,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "success_count": stats.success_count,
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "tasks": [{"name": task.name, "description": task.description} for task in tasks],
+        "tasks": [_task_list_report(task, include_profile) for task in tasks],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _task_report(output: TaskOutput, output_dir: str | None, output_file: str | None) -> dict[str, object]:
-    return {
+def _task_list_report(task: TaskSpec, include_profile: bool = False) -> dict[str, object]:
+    report: dict[str, object] = {"name": task.name, "description": task.description}
+    if include_profile:
+        report["profile"] = build_task_profile(task.description)
+    return report
+
+
+def _task_report(
+    output: TaskOutput,
+    output_dir: str | None,
+    output_file: str | None,
+    include_profile: bool = False,
+) -> dict[str, object]:
+    report: dict[str, object] = {
         "name": output.task_name,
         "file_slug": output.file_slug,
         "output_path": _report_output_path(output, output_dir, output_file),
@@ -795,6 +821,9 @@ def _task_report(output: TaskOutput, output_dir: str | None, output_file: str | 
         "missing_before_defaults": output.missing_before_defaults,
         "defaulted": output.defaulted_keys,
     }
+    if include_profile:
+        report["profile"] = build_task_profile(output.task_description)
+    return report
 
 
 def _report_output_path(output: TaskOutput, output_dir: str | None, output_file: str | None) -> str:
