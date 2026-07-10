@@ -8,14 +8,14 @@
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | SELF_REVIEW.md | 当前仓库位于新建的 `optimize/self-evolve-v5` 分支，但既有 SELF_REVIEW.md 仍保留旧分支第 28 轮停止收尾和最终总结，无法作为本轮持续自驱式进化的活动记录。 | 本清单提交中重置为 v5 活动报告，后续回填 commit | 待回填 |
+| 1 | P1 | SELF_REVIEW.md | 当前仓库位于新建的 `optimize/self-evolve-v5` 分支，但既有 SELF_REVIEW.md 仍保留旧分支第 28 轮停止收尾和最终总结，无法作为本轮持续自驱式进化的活动记录。 | 已修复：已重置为 v5 活动报告 | c82beba |
 | - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 1 轮要求重新通读全部 7 个范围内文件；除 SELF_REVIEW.md 旧状态外，暂未发现会导致用户出错的 P0 或代码/文档不一致 P1。 | 无需修复 | - |
 
 #### 能力增强点（B）
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 代码路径上下文画像 | 用户常只知道“帮我改这个目录/文件”，但不知道如何把现有代码范围、语言、测试线索和验证命令整理成 `/goal` 的边界与验证面；当前只能手动审查代码库后再写描述。 | 在 `scripts/generate_goal.py` 新增 `--inspect-path <path>`（可选 `--path-task <描述>`），扫描本地文件或目录，输出语言分布、样例文件、测试文件线索、推荐边界、验证命令提示、风险提示和可用于 6 要素草稿的建议字段 JSON；同步更新 SKILL 和 README。 | 待实现 | 待回填 |
+| 1 | 代码路径上下文画像 | 用户常只知道“帮我改这个目录/文件”，但不知道如何把现有代码范围、语言、测试线索和验证命令整理成 `/goal` 的边界与验证面；当前只能手动审查代码库后再写描述。 | 在 `scripts/generate_goal.py` 新增 `--inspect-path <path>`（可选 `--path-task <描述>`），扫描本地文件或目录，输出语言分布、样例文件、测试文件线索、推荐边界、验证命令提示、风险提示和可用于 6 要素草稿的建议字段 JSON；同步更新 SKILL 和 README。 | 已实现 | befb48f |
 
 #### 去重审查
 
@@ -33,7 +33,7 @@
 
 ### 本轮总结
 
-进行中：已完成第 1 轮审查清单，计划快速处理 SELF_REVIEW.md 旧状态问题，并实现 1 个能力增强功能。
+修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --inspect-path scripts --path-task '优化 goal 生成器的输入分析能力'`、完整 `--generate` 端到端验证。
 
 ## 用户纠正记录
 
@@ -43,7 +43,8 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 1 轮；累计修复 0 个问题，新增 0 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 1 轮；累计修复 1 个问题，新增 1 个功能，用户纠正 0 次。
 能力饱和状态：否。
-新增能力清单：暂无。
-剩余风险：待每轮结束后持续更新。
+新增能力清单：
+- 第 1 轮：代码路径上下文画像（befb48f）
+剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令，生成最终 `/goal` 前仍需用户或执行者复核真实项目命令和业务目标。
