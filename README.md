@@ -92,6 +92,12 @@ python3 scripts/generate_goal.py --generate \
   --blocked "无法从现有代码推断业务预期时停下问人；允许跳过项不超过 10%"
 ```
 
+如果 6 要素已经保存为 JSON，也可以使用 `--from-json` 读取，命令行显式字段会覆盖文件字段：
+
+```bash
+python3 scripts/generate_goal.py --generate --from-json goal_fields.json
+```
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -235,5 +241,6 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件
+- 单任务从 JSON 文件读取 6 要素生成 `/goal`
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。

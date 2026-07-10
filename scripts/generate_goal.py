@@ -338,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.interactive:
             return _run_interactive(args.output_file)
-    except ValueError as error:
+    except (OSError, ValueError) as error:
         print(f"参数错误：{error}", file=sys.stderr)
         return 2
     parser.print_help(sys.stderr)
@@ -354,6 +354,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
+    parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
     parser.add_argument("--verification", help="Verification Surface（验证方式）。")
@@ -507,14 +508,33 @@ def _risk_level(score: int) -> str:
 
 
 def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
+    field_values = _goal_values_from_json(args.from_json)
+    for key in ELEMENT_ORDER:
+        value = getattr(args, key)
+        if isinstance(value, str) and value.strip():
+            field_values[key] = value.strip()
     return _GoalFields(
-        outcome=_required_value(args, "outcome"),
-        verification=_required_value(args, "verification"),
-        constraints=_required_value(args, "constraints"),
-        boundaries=_required_value(args, "boundaries"),
-        iteration=_required_value(args, "iteration"),
-        blocked=_required_value(args, "blocked"),
+        outcome=_required_field_value(field_values, "outcome"),
+        verification=_required_field_value(field_values, "verification"),
+        constraints=_required_field_value(field_values, "constraints"),
+        boundaries=_required_field_value(field_values, "boundaries"),
+        iteration=_required_field_value(field_values, "iteration"),
+        blocked=_required_field_value(field_values, "blocked"),
     )
+
+
+def _goal_values_from_json(json_path: str | None) -> dict[str, str]:
+    if not json_path:
+        return {}
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    raw_fields = data.get("fields", data) if isinstance(data, dict) else data
+    if not isinstance(raw_fields, dict):
+        raise ValueError("--from-json 必须指向 JSON 对象或包含 fields 对象的 JSON 文件")
+    return {
+        key: str(raw_fields.get(key)).strip()
+        for key in ELEMENT_ORDER
+        if raw_fields.get(key) is not None and str(raw_fields.get(key)).strip()
+    }
 
 
 def _run_interactive(output_file: str | None = None) -> int:
@@ -672,8 +692,8 @@ def _fields_from_mapping(field_values: dict[str, str]) -> _GoalFields:
     )
 
 
-def _required_value(args: argparse.Namespace, field_name: str) -> str:
-    value = getattr(args, field_name)
+def _required_field_value(field_values: dict[str, str], field_name: str) -> str:
+    value = field_values.get(field_name)
     if not isinstance(value, str) or not value.strip():
         label = ELEMENT_LABELS.get(field_name, field_name)
         raise ValueError(f"--{field_name} 不能为空，请补充 {label}")
