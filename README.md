@@ -14,6 +14,7 @@ goal-generator-skill/
 │   ├── sample_tasks.json
 │   ├── sample_tasks.jsonl
 │   ├── sample_tasks.csv
+│   ├── sample_tasks.yaml
 │   └── sample_tasks.md
 ├── references/
 │   ├── elements.md
@@ -101,7 +102,7 @@ python3 scripts/generate_goal.py --interactive
 
 ### 批量生成
 
-当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON、JSONL、CSV 或 Markdown 表格读取任务列表。
+当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON、JSONL、CSV、YAML 或 Markdown 表格读取任务列表。
 
 JSON 输入格式：
 
@@ -131,6 +132,15 @@ CSV 输入格式包含以下表头：
 name,description,outcome,verification,constraints,boundaries,iteration,blocked
 ```
 
+YAML 输入支持常见的任务列表子集，适合复用项目配置或产品文档：
+
+```yaml
+- name: 服务层单元测试
+  description: 为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q
+  fields:
+    constraints: 不改业务逻辑
+```
+
 Markdown 表格输入适合直接复用需求文档、Issue 或 README 中的任务清单，表头可使用英文或中文别名：
 
 ```markdown
@@ -153,6 +163,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.jsonl --dry-run
 
 # 从 CSV 批量分析，适合用 Excel 编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
+
+# 从 YAML 批量分析，适合复用项目配置或产品任务清单
+python3 scripts/batch_generate.py --input examples/sample_tasks.yaml --dry-run
 
 # 从 Markdown 表格批量分析，适合复用需求文档里的任务清单
 python3 scripts/batch_generate.py --input examples/sample_tasks.md --dry-run
@@ -202,7 +215,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量 Bug 修复
 - 代码迁移/升级
 - 文档生成
-- 批量任务指令生成（JSON、JSONL、CSV、Markdown 表格）
+- 批量任务指令生成（JSON、JSONL、CSV、YAML、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 一键生成可复制的缺失要素追问文案

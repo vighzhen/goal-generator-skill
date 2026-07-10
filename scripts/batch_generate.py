@@ -21,7 +21,15 @@ from generate_goal import (
     render_goal_text,
 )
 
-SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".jsonl", ".csv", ".md", ".markdown")
+SUPPORTED_SUFFIXES: tuple[str, ...] = (
+    ".json",
+    ".jsonl",
+    ".csv",
+    ".yaml",
+    ".yml",
+    ".md",
+    ".markdown",
+)
 SLUG_MAX_LENGTH = 50
 DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
@@ -121,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
     parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
-    parser.add_argument("--input", help="输入文件路径，支持 .json、.jsonl、.csv、.md 或 .markdown。")
+    parser.add_argument("--input", help="输入文件路径，支持 .json、.jsonl、.csv、.yaml、.yml、.md 或 .markdown。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
@@ -166,6 +174,8 @@ def _load_tasks(input_path: Path) -> list[TaskSpec]:
         return _load_jsonl_tasks(input_path)
     if suffix == ".csv":
         return _load_csv_tasks(input_path)
+    if suffix in {".yaml", ".yml"}:
+        return _load_yaml_tasks(input_path)
     if suffix in {".md", ".markdown"}:
         return _load_markdown_tasks(input_path)
     supported = "、".join(SUPPORTED_SUFFIXES)
@@ -220,6 +230,88 @@ def _load_csv_tasks(input_path: Path) -> list[TaskSpec]:
         if not reader.fieldnames:
             raise ValueError("CSV 文件缺少表头")
         return [_task_from_csv_row(row, index) for index, row in enumerate(reader, start=1)]
+
+
+def _load_yaml_tasks(input_path: Path) -> list[TaskSpec]:
+    items = _parse_yaml_task_items(input_path.read_text(encoding="utf-8").splitlines())
+    if not items:
+        raise ValueError("YAML 文件没有可读取的任务项")
+    return [_task_from_yaml_item(item, index) for index, item in enumerate(items, start=1)]
+
+
+def _parse_yaml_task_items(lines: list[str]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    in_fields = False
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if stripped.startswith("- "):
+            if current is not None:
+                items.append(current)
+            current = {"fields": {}}
+            in_fields = _consume_yaml_entry(current, stripped[2:].strip(), False, line_number)
+            continue
+        if current is None:
+            raise ValueError("YAML 顶层必须是任务列表")
+        if indent <= 2:
+            in_fields = False
+        in_fields = _consume_yaml_entry(current, stripped, in_fields and indent >= 4, line_number) or in_fields
+    if current is not None:
+        items.append(current)
+    return items
+
+
+def _consume_yaml_entry(item: dict[str, Any], entry: str, in_fields: bool, line_number: int) -> bool:
+    if not entry:
+        return in_fields
+    key, value = _yaml_key_value(entry, line_number)
+    canonical_key = _canonical_yaml_key(key)
+    if canonical_key == "fields" and not value:
+        item.setdefault("fields", {})
+        return True
+    _assign_yaml_value(item, canonical_key, value, in_fields)
+    return False
+
+
+def _yaml_key_value(entry: str, line_number: int) -> tuple[str, str]:
+    if ":" not in entry:
+        raise ValueError(f"YAML 第 {line_number} 行缺少 key: value 结构")
+    key, value = entry.split(":", 1)
+    return key.strip(), _yaml_scalar(value.strip())
+
+
+def _yaml_scalar(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _canonical_yaml_key(key: str) -> str:
+    normalized = re.sub(r"[`*_\\s-]+", "", key.lower())
+    for canonical, aliases in MARKDOWN_COLUMN_ALIASES.items():
+        alias_set = {re.sub(r"[`*_\\s-]+", "", alias.lower()) for alias in aliases}
+        if normalized in alias_set:
+            return canonical
+    return normalized
+
+
+def _assign_yaml_value(item: dict[str, Any], key: str, value: str, in_fields: bool) -> None:
+    if in_fields or key in ELEMENT_ORDER:
+        if key in ELEMENT_ORDER:
+            item.setdefault("fields", {})[key] = value
+        return
+    if key in {"name", "description"}:
+        item[key] = value
+
+
+def _task_from_yaml_item(item: dict[str, Any], index: int) -> TaskSpec:
+    name = _string_value(item.get("name")) or _default_task_name(index)
+    description = _string_value(item.get("description"))
+    fields = _fields_from_mapping(item.get("fields"))
+    return TaskSpec(name=name, description=description, fields=fields)
 
 
 def _load_markdown_tasks(input_path: Path) -> list[TaskSpec]:
