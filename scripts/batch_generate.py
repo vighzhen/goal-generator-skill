@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     start_time = time.perf_counter()
     try:
         min_lint_score = _min_lint_score_from_args(args)
+        max_defaulted_fields = _max_defaulted_fields_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -192,7 +193,15 @@ def main(argv: list[str] | None = None) -> int:
     strict = args.strict or args.check
     summary_only = args.summary_only or args.check
     fail_on_skipped = args.fail_on_skipped or args.check
-    outputs, skipped_tasks = _process_tasks(tasks, dry_run, strict, args.dedupe, default_values, args.verbose)
+    outputs, skipped_tasks = _process_tasks(
+        tasks,
+        dry_run,
+        strict,
+        args.dedupe,
+        default_values,
+        args.verbose,
+        max_defaulted_fields,
+    )
     output_lint_report = None
     if args.lint_output:
         if dry_run:
@@ -234,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     if output_lint_report:
         print(_format_lint_output_summary(output_lint_report))
     print(_format_summary(stats))
+    if max_defaulted_fields is not None and _has_defaulted_limit_skips(skipped_tasks):
+        return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
@@ -275,6 +286,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         help="配合 --lint-fields 或 --lint-output，任务得分低于该阈值时失败（0-100）。",
     )
+    parser.add_argument(
+        "--max-defaulted-fields",
+        type=int,
+        help="真实生成或 dry-run 时允许每个任务最多默认填充的 6 要素数量（0-6）。",
+    )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--inspect-paths", action="store_true", help="批量扫描任务 path/inspect_path/target_path 指向的本地路径并输出上下文建议。")
@@ -301,6 +317,28 @@ def _min_lint_score_from_args(args: argparse.Namespace) -> int | None:
     if not (args.lint_fields or args.lint_output):
         raise ValueError("--min-lint-score 仅适用于 --lint-fields 或 --lint-output")
     return min_lint_score
+
+
+def _max_defaulted_fields_from_args(args: argparse.Namespace) -> int | None:
+    max_defaulted_fields = args.max_defaulted_fields
+    if max_defaulted_fields is None:
+        return None
+    if max_defaulted_fields < 0 or max_defaulted_fields > len(ELEMENT_ORDER):
+        raise ValueError(f"--max-defaulted-fields 必须是 0 到 {len(ELEMENT_ORDER)} 之间的整数")
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--max-defaulted-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return max_defaulted_fields
 
 
 def _load_tasks_from_input(input_value: str) -> list[TaskSpec]:
@@ -2438,6 +2476,7 @@ def _process_tasks(
     dedupe: bool,
     default_values: dict[str, str],
     verbose: bool,
+    max_defaulted_fields: int | None = None,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2449,7 +2488,16 @@ def _process_tasks(
             skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
             continue
         try:
-            output = _process_one_task(task, index, dry_run, strict, default_values, used_slugs, verbose)
+            output = _process_one_task(
+                task,
+                index,
+                dry_run,
+                strict,
+                default_values,
+                used_slugs,
+                verbose,
+                max_defaulted_fields,
+            )
             outputs.append(output)
         except (ValueError, OSError) as error:
             reason = str(error)
@@ -2476,6 +2524,8 @@ def _skip_suggestion(reason: str) -> str:
         return "为该任务补充 description 字段，说明编码目标和上下文。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
+    if "超过 --max-defaulted-fields" in reason:
+        return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
     if "必须是对象" in reason:
         return "把该任务改成包含 name、description、fields 的对象。"
     if "不支持的输入格式" in reason:
@@ -2493,12 +2543,15 @@ def _process_one_task(
     default_values: dict[str, str],
     used_slugs: set[str],
     verbose: bool,
+    max_defaulted_fields: int | None = None,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
     prepared = _prepare_task(task, strict, default_values)
+    if max_defaulted_fields is not None and len(prepared.defaulted_keys) > max_defaulted_fields:
+        raise ValueError(_defaulted_limit_error(prepared.defaulted_keys, max_defaulted_fields))
     content = _format_dry_run(prepared) if dry_run else _format_goal_output(prepared)
     slug = _unique_slug(task.name, index, used_slugs)
     if verbose:
@@ -2512,6 +2565,17 @@ def _process_one_task(
         missing_before_defaults=prepared.missing_before_defaults,
         defaulted_keys=prepared.defaulted_keys,
     )
+
+
+def _defaulted_limit_error(defaulted_keys: list[str], max_defaulted_fields: int) -> str:
+    return (
+        f"默认填充要素 {len(defaulted_keys)} 个，超过 --max-defaulted-fields {max_defaulted_fields}："
+        f"{_format_labels(defaulted_keys)}"
+    )
+
+
+def _has_defaulted_limit_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("超过 --max-defaulted-fields" in skipped.reason for skipped in skipped_tasks)
 
 
 def _prepare_task(
