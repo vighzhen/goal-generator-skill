@@ -12,7 +12,8 @@ goal-generator-skill/
 │   └── batch_generate.py
 ├── examples/
 │   ├── sample_tasks.json
-│   └── sample_tasks.csv
+│   ├── sample_tasks.csv
+│   └── sample_tasks.md
 ├── references/
 │   ├── elements.md
 │   └── anti_laziness.md
@@ -64,7 +65,7 @@ python3 scripts/generate_goal.py --interactive
 
 ### 批量生成
 
-当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON 或 CSV 文件读取任务列表。
+当需要一次为多个编码任务生成 `/goal` 指令时，使用 `scripts/batch_generate.py` 从 JSON、CSV 或 Markdown 表格读取任务列表。
 
 JSON 输入格式：
 
@@ -87,6 +88,14 @@ CSV 输入格式包含以下表头：
 name,description,outcome,verification,constraints,boundaries,iteration,blocked
 ```
 
+Markdown 表格输入适合直接复用需求文档、Issue 或 README 中的任务清单，表头可使用英文或中文别名：
+
+```markdown
+| name | description | constraints |
+| --- | --- | --- |
+| 服务层单元测试 | 为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q | 不改业务逻辑 |
+```
+
 常用命令：
 
 ```bash
@@ -98,6 +107,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json
 
 # 从 CSV 批量分析，适合用 Excel 编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
+
+# 从 Markdown 表格批量分析，适合复用需求文档里的任务清单
+python3 scripts/batch_generate.py --input examples/sample_tasks.md --dry-run
 
 # 每个任务生成一个独立 .txt 文件，输出目录不存在时会自动创建
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/
@@ -126,6 +138,6 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量 Bug 修复
 - 代码迁移/升级
 - 文档生成
-- 批量任务指令生成
+- 批量任务指令生成（JSON、CSV、Markdown 表格）
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。

@@ -21,7 +21,7 @@ from generate_goal import (
     render_goal_text,
 )
 
-SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".csv")
+SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".csv", ".md", ".markdown")
 SLUG_MAX_LENGTH = 50
 DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
@@ -34,6 +34,16 @@ FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "boundaries": ("边界", "范围", "仅", "只", "目录", "排除", "src/", "tests/"),
     "iteration": ("迭代", "每个", "每次", "逐个", "commit", "提交", "预期"),
     "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少"),
+}
+MARKDOWN_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "name": ("name", "任务", "任务名", "名称", "title", "标题"),
+    "description": ("description", "描述", "需求", "任务描述", "request", "prompt"),
+    "outcome": ("outcome", "目标结果", "目标", "交付"),
+    "verification": ("verification", "验证方式", "验证", "验收"),
+    "constraints": ("constraints", "约束", "限制", "不能"),
+    "boundaries": ("boundaries", "边界", "范围", "目录"),
+    "iteration": ("iteration", "迭代策略", "迭代", "提交"),
+    "blocked": ("blocked", "受阻停止条件", "阻塞", "停下", "跳过"),
 }
 
 
@@ -119,6 +129,8 @@ def _load_tasks(input_path: Path) -> list[TaskSpec]:
         return _load_json_tasks(input_path)
     if suffix == ".csv":
         return _load_csv_tasks(input_path)
+    if suffix in {".md", ".markdown"}:
+        return _load_markdown_tasks(input_path)
     supported = "、".join(SUPPORTED_SUFFIXES)
     raise ValueError(f"不支持的输入格式：{suffix}，仅支持 {supported}")
 
@@ -149,6 +161,89 @@ def _load_csv_tasks(input_path: Path) -> list[TaskSpec]:
         if not reader.fieldnames:
             raise ValueError("CSV 文件缺少表头")
         return [_task_from_csv_row(row, index) for index, row in enumerate(reader, start=1)]
+
+
+def _load_markdown_tasks(input_path: Path) -> list[TaskSpec]:
+    lines = input_path.read_text(encoding="utf-8").splitlines()
+    for index in range(len(lines) - 1):
+        headers = _markdown_cells(lines[index])
+        separators = _markdown_cells(lines[index + 1])
+        if not _is_markdown_table_header(headers, separators):
+            continue
+        columns = [_canonical_markdown_column(header) for header in headers]
+        if "description" not in columns:
+            continue
+        rows = _markdown_table_rows(lines[index + 2 :], len(columns))
+        return [_task_from_markdown_row(row, columns, row_index) for row_index, row in enumerate(rows, start=1)]
+    raise ValueError("未找到包含 description/描述 列的 Markdown 任务表格")
+
+
+def _markdown_table_rows(lines: list[str], width: int) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in lines:
+        cells = _markdown_cells(line)
+        if not cells:
+            break
+        rows.append(_normalize_markdown_row(cells, width))
+    return rows
+
+
+def _task_from_markdown_row(row: list[str], columns: list[str], index: int) -> TaskSpec:
+    values = {column: row[position] for position, column in enumerate(columns) if column}
+    name = _string_value(values.get("name")) or _default_task_name(index)
+    description = _string_value(values.get("description"))
+    fields = {key: _string_value(values.get(key)) for key in ELEMENT_ORDER}
+    return TaskSpec(name=name, description=description, fields=_remove_empty_fields(fields))
+
+
+def _markdown_cells(line: str) -> list[str]:
+    stripped = line.strip()
+    if not stripped.startswith("|") or "|" not in stripped[1:]:
+        return []
+    content = stripped.strip("|")
+    cells: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for character in content:
+        if escaped:
+            current.append(character)
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "|":
+            cells.append(_clean_markdown_cell("".join(current)))
+            current = []
+            continue
+        current.append(character)
+    cells.append(_clean_markdown_cell("".join(current)))
+    return cells
+
+
+def _clean_markdown_cell(value: str) -> str:
+    return value.replace("<br>", "\n").replace("<br/>", "\n").strip()
+
+
+def _is_markdown_table_header(headers: list[str], separators: list[str]) -> bool:
+    return bool(headers) and len(headers) == len(separators) and all(_is_separator_cell(cell) for cell in separators)
+
+
+def _is_separator_cell(cell: str) -> bool:
+    return bool(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")))
+
+
+def _canonical_markdown_column(header: str) -> str:
+    normalized = re.sub(r"[`*_\\s-]+", "", header.lower())
+    for key, aliases in MARKDOWN_COLUMN_ALIASES.items():
+        if normalized in {re.sub(r"[`*_\\s-]+", "", alias.lower()) for alias in aliases}:
+            return key
+    return ""
+
+
+def _normalize_markdown_row(cells: list[str], width: int) -> list[str]:
+    normalized = cells[:width]
+    return normalized + [""] * (width - len(normalized))
 
 
 def _task_from_csv_row(row: dict[str, str | None], index: int) -> TaskSpec:
