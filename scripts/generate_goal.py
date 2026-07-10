@@ -121,7 +121,7 @@ BLOCKED_KEYWORDS: tuple[str, ...] = (
 )
 NEGATION_PREFIXES: tuple[str, ...] = ("非", "不", "没有", "无需", "无")
 TEST_TOOL_KEYWORDS: tuple[str, ...] = ("pytest", "unittest")
-REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "README", "说明", "审计")
+REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "readme", "report", "说明", "审计")
 DETAIL_KEYWORDS: tuple[str, ...] = ("维度", "规则", "类别", "批量", "重构", "优化", "迁移")
 COMMIT_SCOPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("错误处理", ("错误处理", "异常", "错误码", "失败路径")),
@@ -481,7 +481,8 @@ def _has_outcome(lowered_text: str) -> bool:
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword.lower() in text for keyword in keywords)
+    lowered_text = text.lower()
+    return any(keyword.lower() in lowered_text for keyword in keywords)
 
 
 def _has_verification(lowered_text: str) -> bool:
