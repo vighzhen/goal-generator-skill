@@ -133,6 +133,24 @@ COMMIT_SCOPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("数据迁移", ("迁移", "升级")),
 )
 DEFAULT_PATH_HINT = "对应文件"
+MAX_INTERACTIVE_ROUNDS = 3
+INTERACTIVE_DEFAULTS: dict[str, str] = {
+    "outcome": "完成用户描述的编码任务，并在最终回复中列出实际交付物",
+    "verification": "每个改动后运行最相关的现有验证命令，最终执行语法检查或项目可用测试",
+    "constraints": "不改变既有功能行为，不引入未经确认的新依赖，不做范围外重构",
+    "boundaries": "仅处理用户描述中直接相关的文件和目录，范围外问题只记录",
+    "iteration": "每个独立改动验证通过后单独 git add + git commit，预期 3-8 个 commit",
+    "blocked": "遇到必须由用户决定的业务行为变化、无法验证的关键风险或范围冲突时停下询问",
+}
+FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "outcome": ("outcome", "目标结果", "目标", "交付"),
+    "verification": ("verification", "验证方式", "验证", "验收"),
+    "constraints": ("constraints", "约束", "限制", "不能"),
+    "boundaries": ("boundaries", "边界", "范围", "目录"),
+    "iteration": ("iteration", "迭代策略", "迭代", "提交"),
+    "blocked": ("blocked", "受阻停止条件", "阻塞", "停下", "跳过"),
+}
+FIELD_VALUE_TRIM_CHARS = " ;；,，\n\t"
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 NUMBER_PATTERN = re.compile(r"\d+")
 BRANCH_PATTERN = re.compile(r"(?:分支|branch)\s*[`'\"]?([A-Za-z0-9._/-]+)")
@@ -234,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.generate:
             print(render_goal_text(_goal_from_args(args)))
             return 0
+        if args.interactive:
+            return _run_interactive()
     except ValueError as error:
         print(f"参数错误：{error}", file=sys.stderr)
         return 2
@@ -245,6 +265,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
+    parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
     parser.add_argument("--verification", help="Verification Surface（验证方式）。")
     parser.add_argument("--constraints", help="Constraints（约束）。")
@@ -262,6 +283,161 @@ def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
         boundaries=_required_value(args, "boundaries"),
         iteration=_required_value(args, "iteration"),
         blocked=_required_value(args, "blocked"),
+    )
+
+
+def _run_interactive() -> int:
+    field_values: dict[str, str] = {}
+    try:
+        combined_text = input("请输入编码任务描述：").strip()
+        if not combined_text:
+            print("未输入任务描述，已退出。", file=sys.stderr)
+            return 2
+        field_values.update(_extract_labeled_fields(combined_text))
+        for _round_index in range(MAX_INTERACTIVE_ROUNDS):
+            analysis = analyze_description(combined_text)
+            _merge_present_fallbacks(field_values, combined_text, analysis)
+            missing = _missing_field_keys(field_values)
+            if not missing:
+                print(render_goal_text(_fields_from_mapping(field_values)))
+                return 0
+            _print_missing_questions(missing)
+            supplement = input("请一次性补充以上信息：").strip()
+            if supplement:
+                combined_text = f"{combined_text}\n{supplement}"
+                field_values.update(_extract_labeled_fields(supplement))
+        _merge_present_fallbacks(field_values, combined_text, analyze_description(combined_text))
+        defaulted_keys = _apply_interactive_defaults(field_values)
+        _print_default_notice(defaulted_keys)
+        print(render_goal_text(_fields_from_mapping(field_values)))
+        return 0
+    except KeyboardInterrupt:
+        print("\n已取消交互。", file=sys.stderr)
+        return 130
+
+
+def _extract_labeled_fields(text: str) -> dict[str, str]:
+    values = _extract_inline_labeled_fields(text)
+    for line in text.splitlines():
+        key, value = _parse_labeled_line(line)
+        if key and value and key not in values:
+            values[key] = value
+    return values
+
+
+def _extract_inline_labeled_fields(text: str) -> dict[str, str]:
+    markers = _find_field_markers(text)
+    values: dict[str, str] = {}
+    for index, (_start, end, key) in enumerate(markers):
+        next_start = markers[index + 1][0] if index + 1 < len(markers) else len(text)
+        value = text[end:next_start].strip(FIELD_VALUE_TRIM_CHARS)
+        if value:
+            values[key] = value
+    return values
+
+
+def _find_field_markers(text: str) -> list[tuple[int, int, str]]:
+    lowered_text = text.lower()
+    markers: list[tuple[int, int, str]] = []
+    for key, aliases in FIELD_ALIASES.items():
+        markers.extend(_markers_for_aliases(lowered_text, key, aliases))
+    return sorted(markers, key=lambda marker: marker[0])
+
+
+def _markers_for_aliases(
+    lowered_text: str,
+    key: str,
+    aliases: tuple[str, ...],
+) -> list[tuple[int, int, str]]:
+    markers: list[tuple[int, int, str]] = []
+    for alias in aliases:
+        for separator in ("：", ":"):
+            marker = f"{alias.lower()}{separator}"
+            markers.extend(_markers_for_text(lowered_text, key, marker))
+    return markers
+
+
+def _markers_for_text(lowered_text: str, key: str, marker: str) -> list[tuple[int, int, str]]:
+    markers: list[tuple[int, int, str]] = []
+    start_index = 0
+    while True:
+        index = lowered_text.find(marker, start_index)
+        if index == -1:
+            return markers
+        markers.append((index, index + len(marker), key))
+        start_index = index + len(marker)
+
+
+def _parse_labeled_line(line: str) -> tuple[str | None, str]:
+    stripped_line = line.strip()
+    lowered_line = stripped_line.lower()
+    for key, aliases in FIELD_ALIASES.items():
+        value = _value_after_alias(stripped_line, lowered_line, aliases)
+        if value:
+            return key, value
+    return None, ""
+
+
+def _value_after_alias(line: str, lowered_line: str, aliases: tuple[str, ...]) -> str:
+    for alias in aliases:
+        for separator in ("：", ":"):
+            prefix = f"{alias.lower()}{separator}"
+            if lowered_line.startswith(prefix):
+                return line[len(prefix):].strip()
+    return ""
+
+
+def _merge_present_fallbacks(
+    field_values: dict[str, str],
+    combined_text: str,
+    analysis: AnalysisResult,
+) -> None:
+    for key in analysis["present"]:
+        if not field_values.get(key):
+            field_values[key] = _fallback_field_value(key, combined_text)
+
+
+def _fallback_field_value(key: str, combined_text: str) -> str:
+    if key == "outcome":
+        return combined_text.splitlines()[0].strip()
+    return _normalize_text(combined_text)
+
+
+def _missing_field_keys(field_values: dict[str, str]) -> list[str]:
+    return [key for key in ELEMENT_ORDER if not field_values.get(key)]
+
+
+def _print_missing_questions(missing: list[str]) -> None:
+    print("你的需求还缺少以下信息，请补充：")
+    for index, key in enumerate(missing, start=1):
+        print(f"{index}. {ELEMENT_LABELS[key]}：{QUESTION_EXAMPLES[key]}")
+    print("你可以直接简短回答，我会帮你补全成完整指令。")
+
+
+def _apply_interactive_defaults(field_values: dict[str, str]) -> list[str]:
+    defaulted_keys: list[str] = []
+    for key in ELEMENT_ORDER:
+        if not field_values.get(key):
+            field_values[key] = INTERACTIVE_DEFAULTS[key]
+            defaulted_keys.append(key)
+    return defaulted_keys
+
+
+def _print_default_notice(defaulted_keys: list[str]) -> None:
+    if not defaulted_keys:
+        return
+    labels = "、".join(ELEMENT_LABELS[key] for key in defaulted_keys)
+    print(f"已达到最多 {MAX_INTERACTIVE_ROUNDS} 轮补充，以下要素使用默认值：{labels}。")
+
+
+def _fields_from_mapping(field_values: dict[str, str]) -> _GoalFields:
+    return _GoalFields(
+        outcome=field_values["outcome"],
+        verification=field_values["verification"],
+        constraints=field_values["constraints"],
+        boundaries=field_values["boundaries"],
+        iteration=field_values["iteration"],
+        blocked=field_values["blocked"],
     )
 
 
