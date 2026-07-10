@@ -119,17 +119,63 @@
 
 | 功能名称 | 处理方式 | Commit | 验证结果 |
 | --- | --- | --- | --- |
-| 待执行 | 待执行 | - | - |
+| 单任务 Markdown 就绪度卡片 | 已删除 | d89c5ab | 通过：py_compile + --analyze |
+| 单任务 Markdown 评审卡片 | 已删除 | 584bd0d | 通过：py_compile + --analyze |
+| 单任务 Markdown 风险卡片 | 已删除 | 9eeb290 | 通过：py_compile + --analyze |
+| 单任务描述对比 | 已删除 | a07d510 | 通过：py_compile + --analyze |
+| 批量 Markdown 就绪度矩阵 | 已删除 | 9f23f40 | 通过：py_compile + --analyze + batch dry-run |
+| 批量 Markdown 评审看板 | 已删除 | a629f8b | 通过：py_compile + --analyze + batch dry-run |
+| 批量 Markdown 风险报告 | 已删除 | 03769ae | 通过：py_compile + --analyze + batch dry-run |
+| 批量追问 Markdown 包 | 已删除 | 4ef341b | 通过：py_compile + --analyze + batch dry-run |
+| 批量敏感信息 Markdown 报告 | 已删除 | 22d9e37 | 通过：py_compile + --analyze + batch dry-run |
+| 批量 Goal JSONL 草稿 | 已删除 | 337ea8d | 通过：py_compile + --analyze + batch dry-run |
+| 批量字段建议导出 | 已删除 | 92dbbd6 | 通过：py_compile + --analyze + batch dry-run |
+| 批量可执行度评分门禁 | 已删除 | cdecc2c | 通过：py_compile + --analyze + batch dry-run |
+| 批量字段状态 CSV | 已删除 | dd1fd8b | 通过：py_compile + --analyze + batch dry-run |
+| 批量缺失 Markdown 报告 | 已删除 | 4193c7e | 通过：py_compile + --analyze + batch dry-run |
+| 批量 Markdown 报告 | 已删除 | dea7816 | 通过：py_compile + --analyze + batch dry-run |
+| 批量输出索引 | 已删除 | cb41e43 | 通过：py_compile + --analyze + batch dry-run |
+| 批量画像摘要 | 已删除 | 1b72f35 | 通过：py_compile + --analyze + batch dry-run |
+| 低频批量输入格式（JSONL/YAML/Markdown/STDIN） | 已删除 | 39e4890 | 通过：py_compile + --analyze + batch dry-run |
+| 机器可读能力示例清单 | 已删除 | 95f18e2 | 通过：py_compile + --analyze |
+| 单任务模板 Markdown 展示 | 已删除 | deba636 | 通过：py_compile + --analyze |
+| 单任务默认草稿 | 已删除 | 31895f4 | 通过：py_compile + --analyze |
+| 单任务追问包 JSON | 已删除 | 71d643b | 通过：py_compile + --analyze |
+| 缺失解释入口 | 已修复 | 87515e5 | 通过：py_compile + --analyze + --explain-missing |
+| 单任务字段建议导出 | 已删除 | 70b821f | 通过：py_compile + --analyze + batch dry-run |
+| 单任务 Goal JSON 草稿 | 已删除 | 2fcc00e | 通过：py_compile + --analyze + batch dry-run |
+| 单任务可执行度评分 | 已删除 | 3b45024 | 通过：py_compile + --analyze + batch dry-run |
+| 完整 `/goal` 生成描述简写 | 已简化 | 530a0da | 通过：`--generate '给项目加单元测试' --branch test-branch` |
+| 核心保留功能 | 已保留 | - | 最终验证覆盖 `--analyze`、`--generate`、批量 dry-run |
 
 ## 文档同步
 
 | 文件 | 改动内容 | Commit |
 | --- | --- | --- |
-| 待执行 | 待执行 | - |
+| README.md | 移除已删除单任务评分/对比/卡片/草稿/机器可读清单描述；同步批量输入仅支持 JSON/CSV 和保留批量选项。 | fd5a52a |
+| SKILL.md | 移除已删除 CLI 的工作流调用建议；同步单任务和批量保留能力。 | fd5a52a |
 
 ## 最终总结
 
-删除 0 个功能，保留 0 个功能，简化 0 个功能
-代码减少 0 行
-保留功能清单：（清理完成后更新）
-剩余风险：（清理完成后更新）
+删除 25 个功能，保留 27 个功能，简化 1 个功能
+
+代码减少 2649 行（清理前 `scripts/generate_goal.py` + `scripts/batch_generate.py` 共 4722 行；清理后分别为 1419 行和 654 行，共 2073 行）。
+
+保留功能清单：
+
+- 单任务：`--analyze`、`--profile`、`--redaction-check`、`--explain-missing`、`--list-templates`、`--template`、`--questions`、`--generate`、`--generate <description> --branch <branch>` 简写、`--validate-goal-file`、`--validate-fields-json`、`--interactive`、`--from-json`、`--output-file`。
+- 批量：JSON/CSV 输入、位置参数输入、`--output-dir`、`--output-file`、`--defaults-json`、`GOAL_GENERATOR_DEFAULTS_JSON`、`--report-json`、`--filter`、`--sort-by`、`--limit`、`--list-tasks`、`--dedupe`、`--fail-on-skipped`、`--summary-only`、`--dry-run`、`--check`、`--strict`、`--verbose`。
+
+最终验证：
+
+1. `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py` 通过。
+2. `python3 scripts/generate_goal.py --analyze '给项目加单元测试'` 通过。
+3. `python3 scripts/generate_goal.py --generate '给项目加单元测试' --branch test-branch` 通过。
+4. `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 通过。
+5. README.md 和 SKILL.md 已用 grep 检查，不再描述已删除的 CLI 参数或低频批量格式。
+
+剩余风险：
+
+- `CLEANUP_REPORT.md` 的“功能盘点/价值评估”保留的是清理前审计行号，用于证明先盘点再清理；当前代码行号以最终源码为准。
+- 因约束要求“不删已有文件”，`examples/sample_tasks.jsonl`、`examples/sample_tasks.yaml`、`examples/sample_tasks.md` 文件仍留在仓库中，但 README.md/SKILL.md 不再宣传这些输入格式，脚本也不再支持它们。
+- `--profile` 中的风险等级仍是启发式提示，仅用于追问和模板建议，不作为批量门禁或可靠评分依据。
