@@ -230,6 +230,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --check --r
 # 批量检查任务 6 要素字段语义质量，适合生成前或 CI 门禁
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-fields --report-json fields_lint.json
 
+# 批量审计任务名称、描述和字段中的 token、邮箱、URL 等敏感信息
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --redaction-check --report-json redaction_report.json
+
 # CI 门禁：只要存在跳过任务就返回非零退出码，同时仍输出摘要和报告
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --strict --fail-on-skipped --report-json batch_report.json
 
@@ -281,6 +284,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
 - `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。
+- `--redaction-check` 不生成 `/goal` 正文，而是逐个任务审计名称、描述和 6 要素字段值中的 token、密钥、邮箱、URL 等敏感片段；发现风险时退出码为 1，并在报告中提供脱敏预览。
 - `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
 
 ## 6 个必要要素
@@ -307,6 +311,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 缺失 6 要素的原因解释、优先级和补全建议
 - 从本地文件或目录反向整理 `/goal` 边界、项目配置验证命令和风险线索
 - 单任务敏感信息检查和脱敏预览
+- 批量任务敏感信息审计和脱敏预览
 - 单任务 6 要素字段 JSON 质量校验
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 已有 `/goal` 文件结构校验

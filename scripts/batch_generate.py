@@ -20,6 +20,7 @@ from generate_goal import (
     _GoalFields,
     _extract_labeled_fields,
     analyze_description,
+    check_redaction,
     lint_fields_json_data,
     render_goal_text,
 )
@@ -106,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.redaction_check:
+        return _run_batch_redaction_check_mode(tasks, args, start_time)
     if args.lint_fields:
         return _run_lint_fields_mode(tasks, args, start_time)
     if args.plan_dependencies:
@@ -157,6 +160,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
+    parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -243,6 +247,137 @@ def _run_dependency_plan_mode(tasks: list[TaskSpec], args: argparse.Namespace, s
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
+
+
+def _run_batch_redaction_check_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    checked_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    redaction_report = _build_batch_redaction_report(checked_tasks)
+    summary_only = args.summary_only or args.check
+    if not summary_only:
+        print(_format_batch_redaction_report(redaction_report))
+    elapsed_seconds = time.perf_counter() - start_time
+    risky_count = int(redaction_report["risky_count"])
+    stats = BatchStats(int(redaction_report["safe_count"]), risky_count + len(skipped_tasks), elapsed_seconds)
+    if args.report_json:
+        _write_batch_redaction_report(redaction_report, skipped_tasks, stats, Path(args.report_json))
+    print(_format_redaction_summary(redaction_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if risky_count:
+        return 1
+    if fail_on_skipped and skipped_tasks:
+        return 1
+    return 0
+
+
+def _build_batch_redaction_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_reports = [_task_redaction_report(task) for task in tasks]
+    risky_count = sum(1 for report in task_reports if not report["safe_to_share"])
+    finding_count = sum(int(report.get("finding_count", 0)) for report in task_reports)
+    return {
+        "safe_to_share": risky_count == 0,
+        "task_count": len(task_reports),
+        "safe_count": len(task_reports) - risky_count,
+        "risky_count": risky_count,
+        "finding_count": finding_count,
+        "tasks": task_reports,
+    }
+
+
+def _task_redaction_report(task: TaskSpec) -> dict[str, object]:
+    if task.load_error:
+        return {
+            "name": task.name,
+            "safe_to_share": False,
+            "risk_level": "input_error",
+            "risk_score": 100,
+            "finding_count": 0,
+            "finding_types": [],
+            "findings": [],
+            "redacted_preview": "",
+            "recommended_action": f"修复任务输入错误后再审计：{task.load_error}",
+        }
+    text = _task_redaction_text(task)
+    if not text.strip():
+        return {
+            "name": task.name,
+            "safe_to_share": True,
+            "risk_level": "none",
+            "risk_score": 0,
+            "finding_count": 0,
+            "finding_types": [],
+            "findings": [],
+            "redacted_preview": "",
+            "recommended_action": "任务没有可审计文本。",
+        }
+    report = check_redaction(text)
+    return {
+        "name": task.name,
+        "safe_to_share": report["safe_to_share"],
+        "risk_level": report["risk_level"],
+        "risk_score": report["risk_score"],
+        "finding_count": report["finding_count"],
+        "finding_types": report["finding_types"],
+        "findings": report["findings"],
+        "redacted_preview": report["redacted_preview"],
+        "recommended_action": report["recommended_action"],
+    }
+
+
+def _task_redaction_text(task: TaskSpec) -> str:
+    parts = [f"name: {task.name}"]
+    if task.description:
+        parts.append(f"description: {task.description}")
+    for key in ELEMENT_ORDER:
+        value = task.fields.get(key)
+        if value:
+            parts.append(f"{key}: {value}")
+    return "\n".join(parts)
+
+
+def _format_batch_redaction_report(redaction_report: dict[str, object]) -> str:
+    lines = ["批量敏感信息审计："]
+    task_reports = redaction_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        lines.append("无可审计任务。")
+        return "\n".join(lines)
+    for task_report in task_reports:
+        if isinstance(task_report, dict):
+            lines.extend(_format_task_redaction_lines(task_report))
+    return "\n".join(lines)
+
+
+def _format_task_redaction_lines(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    status = "安全" if task_report.get("safe_to_share") else "有风险"
+    lines = [
+        (
+            f"- {name}：{status}，风险级别 {task_report.get('risk_level', 'unknown')}，"
+            f"发现 {task_report.get('finding_count', 0)} 个。"
+        )
+    ]
+    findings = task_report.get("findings", [])
+    if not isinstance(findings, list) or not findings:
+        return lines
+    for finding in findings[:3]:
+        if not isinstance(finding, dict):
+            continue
+        lines.append(
+            f"  - {finding.get('type', 'unknown')} / {finding.get('severity', 'unknown')}："
+            f"{finding.get('preview', '')}；建议：{finding.get('recommendation', '')}"
+        )
+    if len(findings) > 3:
+        lines.append(f"  - 其余 {len(findings) - 3} 个发现请查看 --report-json。")
+    return lines
+
+
+def _format_redaction_summary(redaction_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "敏感信息审计完成："
+        f"安全 {redaction_report.get('safe_count', 0)} 个，"
+        f"有风险 {redaction_report.get('risky_count', 0)} 个，"
+        f"发现 {redaction_report.get('finding_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
 
 
 def _run_lint_fields_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
@@ -969,6 +1104,23 @@ def _write_dependency_plan_report(
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
         "dependency_plan": plan,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_batch_redaction_report(
+    redaction_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "redaction": redaction_report,
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
