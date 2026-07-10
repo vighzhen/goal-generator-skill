@@ -620,6 +620,10 @@ def main(argv: list[str] | None = None) -> int:
             validation = validate_goal_file(args.validate_goal_file)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
+        if args.lint_goal_file:
+            lint_report = lint_goal_file(args.lint_goal_file)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.validate_fields_json:
             validation = validate_fields_json_file(args.validate_fields_json)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
@@ -656,6 +660,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
+    parser.add_argument("--lint-goal-file", help="检查已有 /goal 指令文件的结构和 6 要素语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
@@ -704,6 +709,76 @@ def validate_goal_file(goal_file: str) -> dict[str, object]:
     """校验已有 /goal 指令文件的结构完整度。"""
     goal_path = Path(goal_file)
     return validate_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def lint_goal_file(goal_file: str) -> dict[str, object]:
+    """校验已有 /goal 指令文件的结构和 6 要素语义质量。"""
+    goal_path = Path(goal_file)
+    return lint_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def lint_goal_text(goal_text: str, source: str = "") -> dict[str, object]:
+    """从 /goal 文本抽取 6 要素并复用字段语义质量门禁。"""
+    validation = validate_goal_text(goal_text, source)
+    extracted_fields = _extract_goal_fields(goal_text)
+    field_lint = lint_fields_json_data({"fields": extracted_fields}, source)
+    passed = bool(validation["valid"]) and bool(field_lint["passed"])
+    return {
+        "passed": passed,
+        "source": source,
+        "validation": validation,
+        "extracted_fields": extracted_fields,
+        "field_lint": field_lint,
+        "summary": _goal_lint_summary(passed, validation, field_lint),
+    }
+
+
+def _extract_goal_fields(goal_text: str) -> dict[str, str]:
+    overview_text = _goal_overview_text(goal_text)
+    fields: dict[str, str] = {}
+    for key in ELEMENT_ORDER:
+        value = _extract_goal_field_value(overview_text, key)
+        if value:
+            fields[key] = value
+    return fields
+
+
+def _goal_overview_text(goal_text: str) -> str:
+    for line in goal_text.splitlines():
+        stripped_line = line.strip()
+        if stripped_line.startswith("/goal "):
+            return stripped_line
+    return _normalize_text(goal_text)
+
+
+def _extract_goal_field_value(overview_text: str, key: str) -> str:
+    cue = GOAL_ELEMENT_CUES[key]
+    start_index = overview_text.find(cue)
+    if start_index == -1:
+        return ""
+    value_start = start_index + len(cue)
+    end_index = _goal_field_end_index(overview_text, key, value_start)
+    return overview_text[value_start:end_index].strip(" 。，；;,.")
+
+
+def _goal_field_end_index(overview_text: str, key: str, value_start: int) -> int:
+    current_index = ELEMENT_ORDER.index(key)
+    candidates = [
+        index
+        for next_key in ELEMENT_ORDER[current_index + 1 :]
+        if (index := overview_text.find(GOAL_ELEMENT_CUES[next_key], value_start)) != -1
+    ]
+    final_marker_index = overview_text.find("全过程必须", value_start)
+    if final_marker_index != -1:
+        candidates.append(final_marker_index)
+    return min(candidates) if candidates else len(overview_text)
+
+
+def _goal_lint_summary(passed: bool, validation: dict[str, object], field_lint: dict[str, object]) -> str:
+    if passed:
+        return f"/goal 文件结构和语义质量检查通过，得分 {field_lint.get('score', 0)}。"
+    structure_state = "结构通过" if validation.get("valid") else "结构未通过"
+    return f"/goal 文件检查未通过：{structure_state}，语义得分 {field_lint.get('score', 0)}。"
 
 
 def validate_fields_json_file(fields_file: str) -> dict[str, object]:

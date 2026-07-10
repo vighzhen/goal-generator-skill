@@ -172,6 +172,16 @@ python3 scripts/generate_goal.py --lint-fields-json goal_fields.json
 python3 scripts/generate_goal.py --validate-goal-file goal.txt
 ```
 
+### 检查已有 /goal 语义质量
+
+结构完整的 `/goal` 仍可能存在字段空泛、验证方式不具体或边界不清的问题。使用 `--lint-goal-file` 会先做结构校验，再从概述中抽取 6 要素并复用字段语义质量门禁：
+
+```bash
+python3 scripts/generate_goal.py --lint-goal-file goal.txt
+```
+
+命令输出 `validation`、`extracted_fields`、`field_lint` 和 `summary`；结构无效或语义质量未通过时退出码为 1。
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -315,6 +325,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 单任务 6 要素字段 JSON 质量校验
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 已有 `/goal` 文件结构校验
+- 已有 `/goal` 文件语义质量检查
 - 一键生成可复制的缺失要素追问文案
 - 原始需求与补充回答合并为 6 要素字段草稿
 - 单任务 6 要素字段语义质量检查和生成前门禁
