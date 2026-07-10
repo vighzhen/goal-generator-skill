@@ -378,6 +378,27 @@
 
 修复 0 个问题，新增 2 个功能。
 
+## 第 19 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/batch_generate.py | `_skip_suggestion` 对不支持输入格式的修复建议只列出 .json/.jsonl/.csv/.md/.markdown，遗漏已支持的 .yaml/.yml，用户看到错误建议时可能误以为 YAML 不受支持。 | 待修复 | 待提交 |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 单任务字段建议 JSON | 用户想把一句话需求转成可编辑的 6 要素字段草稿，再交给自动化或人工补齐；当前 --draft 是整段 `/goal` 文本，不便机器读取。 | 在 generate_goal.py 新增 --suggest-fields <description>，输出 fields、sources、missing、task_type、score 等 JSON，保留输入中已识别字段并为缺失项填推荐方向。 | 待实现 | 待提交 |
+| 2 | 批量可执行度 Markdown 报告 | --score-summary 适合终端，--report-json 适合机器，但团队评审/PR 场景还需要可直接阅读和分享的评分报告。 | 在 batch_generate.py 新增 --score-report-md <path>，写出任务可执行度分数、等级、风险、缺失要素和下一步建议 Markdown 表格。 | 待实现 | 待提交 |
+
+### 本轮总结
+
+修复 0 个问题，新增 0 个功能。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
