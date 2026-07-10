@@ -559,12 +559,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务敏感信息检查 JSON | 用户把任务描述贴给机器人、Issue 或外部系统前，可能无意包含 token、邮箱、URL、密钥等敏感信息；当前工具只评估 6 要素，不提示共享风险。 | 在 generate_goal.py 新增 --redaction-check <description>，输出 findings、risk_level、safe_to_share、redacted_preview 和建议动作。 | 待实现 | - |
-| 2 | 批量敏感信息 Markdown 报告 | 团队批量任务清单经常来自工单、聊天或需求文档，需要先审计哪些任务含敏感片段再分发；当前批量报告关注可执行度和风险，不覆盖隐私/泄密风险。 | 在 batch_generate.py 新增 --redaction-report-md <path>，按任务输出敏感类型、数量、风险等级、脱敏预览和处理建议，并支持 report-json/dedupe/summary-only/fail-on-skipped。 | 待实现 | - |
+| 1 | 单任务敏感信息检查 JSON | 用户把任务描述贴给机器人、Issue 或外部系统前，可能无意包含 token、邮箱、URL、密钥等敏感信息；当前工具只评估 6 要素，不提示共享风险。 | 在 generate_goal.py 新增 --redaction-check <description>，输出 findings、risk_level、safe_to_share、redacted_preview 和建议动作。 | 已实现 | 782e8c2 |
+| 2 | 批量敏感信息 Markdown 报告 | 团队批量任务清单经常来自工单、聊天或需求文档，需要先审计哪些任务含敏感片段再分发；当前批量报告关注可执行度和风险，不覆盖隐私/泄密风险。 | 在 batch_generate.py 新增 --redaction-report-md <path>，按任务输出敏感类型、数量、风险等级、脱敏预览和处理建议，并支持 report-json/dedupe/summary-only/fail-on-skipped。 | 已实现 | ad161e8 |
 
 ### 本轮总结
 
-待完成。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
