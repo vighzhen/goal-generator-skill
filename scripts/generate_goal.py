@@ -132,6 +132,68 @@ COMMIT_SCOPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("文档", ("文档", "报告", "readme")),
     ("数据迁移", ("迁移", "升级")),
 )
+PROFILE_RULES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
+    (
+        "testing",
+        "测试编写",
+        ("测试", "pytest", "unittest", "覆盖率", "用例"),
+        {
+            "outcome": "明确测试目录、被测模块、目标用例数量或覆盖路径。",
+            "verification": "指定局部测试命令和最终全量测试命令。",
+            "constraints": "强调不改业务逻辑、不弱化现有测试、不引入未确认依赖。",
+            "boundaries": "说明被测代码目录和对应测试目录，排除集成成本过高的范围。",
+            "iteration": "建议按文件或模块分批补测试，每批验证后单独 commit。",
+            "blocked": "无法从代码推断断言或业务预期时停下问人。",
+        },
+    ),
+    (
+        "bugfix",
+        "Bug 修复",
+        ("修复", "bug", "错误", "报错", "异常", "500"),
+        {
+            "outcome": "明确复现条件、期望行为和修复后的用户可见结果。",
+            "verification": "要求复现用例、回归测试或最小命令证明问题消失。",
+            "constraints": "保持公共 API、错误码、数据格式和兼容行为不被误改。",
+            "boundaries": "限定到触发 bug 的模块、调用链和必要测试。",
+            "iteration": "建议先补失败验证，再最小修复，再单独提交。",
+            "blocked": "缺少业务期望或必须改变外部行为时停下确认。",
+        },
+    ),
+    (
+        "refactor",
+        "代码质量优化/重构",
+        ("优化", "重构", "质量", "坏味道", "复杂度"),
+        {
+            "outcome": "明确处理目录、文件数量、质量维度和是否生成报告。",
+            "verification": "要求每个改动后的语法/测试验证和最终审计证据。",
+            "constraints": "强调行为保持、不做范围外重构、不引入新依赖。",
+            "boundaries": "列出包含目录、排除测试/迁移/生成文件等范围。",
+            "iteration": "建议每个独立重构点验证后单独 commit。",
+            "blocked": "只有不可避免改变功能行为时才允许跳过或停下。",
+        },
+    ),
+    (
+        "docs",
+        "文档生成",
+        ("文档", "报告", "readme", "说明"),
+        {
+            "outcome": "明确目标文档、章节结构、覆盖对象和可追溯证据。",
+            "verification": "要求检查链接、命令示例、路径引用和与代码一致性。",
+            "constraints": "不编造未验证能力，不修改无关代码。",
+            "boundaries": "限定文档文件、引用代码范围和排除范围。",
+            "iteration": "建议按章节或主题提交，每次检查死链和示例。",
+            "blocked": "缺少产品口径或无法验证事实时停下问人。",
+        },
+    ),
+)
+DEFAULT_PROFILE_TEMPLATE: dict[str, str] = {
+    "outcome": "明确最终交付物、完成程度、分支名和可审计产物。",
+    "verification": "给出每步局部验证和最终验收命令或证据。",
+    "constraints": "说明不能修改的行为、依赖、接口、数据和风格限制。",
+    "boundaries": "列出包含目录/文件和排除范围，范围外只记录。",
+    "iteration": "规定每步粒度、验证动作、commit 节奏和预期数量。",
+    "blocked": "定义允许跳过、必须停下问人和记录证据的条件。",
+}
 DEFAULT_PATH_HINT = "对应文件"
 MAX_INTERACTIVE_ROUNDS = 3
 INTERACTIVE_DEFAULTS: dict[str, str] = {
@@ -246,6 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.profile:
+            print(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2))
+            return 0
         if args.analyze:
             print(json.dumps(analyze_description(args.analyze), ensure_ascii=False, indent=2))
             return 0
@@ -264,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
+    parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
@@ -273,6 +339,54 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iteration", help="Iteration Policy（迭代策略）。")
     parser.add_argument("--blocked", help="Blocked Stop Condition（受阻停止条件）。")
     return parser
+
+
+def build_task_profile(description: str) -> dict[str, object]:
+    """构建任务类型画像和 6 要素推荐模板。"""
+    normalized_text = _normalize_text(description)
+    analysis = analyze_description(normalized_text)
+    profile_id, label, template = _infer_profile(normalized_text)
+    level, reasons = _estimate_complexity(normalized_text, analysis["missing"])
+    return {
+        "task_type": {"id": profile_id, "label": label},
+        "complexity": {"level": level, "reasons": reasons},
+        "ask_strategy": _ask_strategy(level, analysis["missing"]),
+        "missing": analysis["missing"],
+        "present": analysis["present"],
+        "recommended_fields": template,
+    }
+
+
+def _infer_profile(text: str) -> tuple[str, str, dict[str, str]]:
+    lowered_text = text.lower()
+    for profile_id, label, keywords, template in PROFILE_RULES:
+        if _contains_any(lowered_text, keywords):
+            return profile_id, label, template
+    return "generic", "通用编码任务", DEFAULT_PROFILE_TEMPLATE
+
+
+def _estimate_complexity(text: str, missing: list[str]) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    if len(text) > 120:
+        reasons.append("描述较长，可能包含多个子任务或隐含约束")
+    if len(missing) >= 4:
+        reasons.append("缺失 4 个以上必要要素，需要集中补齐")
+    if any(keyword in text for keyword in ("批量", "迁移", "升级", "多个", "全量")):
+        reasons.append("涉及批量或跨范围执行，需要更严格边界和迭代策略")
+    if not reasons:
+        return "low", ["描述较短且缺失要素较少"]
+    if len(reasons) == 1 and len(missing) <= 3:
+        return "medium", reasons
+    return "high", reasons
+
+
+def _ask_strategy(level: str, missing: list[str]) -> str:
+    labels = "、".join(ELEMENT_LABELS[key] for key in missing) or "无缺失要素"
+    if level == "low":
+        return f"简短追问缺失项即可：{labels}。"
+    if level == "medium":
+        return f"一次性追问缺失项，并要求用户给出路径、命令或数量：{labels}。"
+    return f"按 6 要素分组追问，优先确认 Outcome、Boundaries 和 Verification：{labels}。"
 
 
 def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
