@@ -309,6 +309,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.list_templates:
+            _emit_output(json.dumps(list_task_templates(), ensure_ascii=False, indent=2), args.output_file)
+            return 0
+        if args.template:
+            _emit_output(json.dumps(get_task_template(args.template), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.profile:
             _emit_output(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -334,6 +340,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
+    parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
+    parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
@@ -355,6 +363,25 @@ def _emit_output(content: str, output_file: str | None) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(f"{content}\n", encoding="utf-8")
     print(f"已写入：{output_path}")
+
+
+def list_task_templates() -> list[dict[str, str]]:
+    """列出可直接复用的任务类型模板索引。"""
+    templates = [{"id": profile_id, "label": label} for profile_id, label, _keywords, _template in PROFILE_RULES]
+    templates.append({"id": "generic", "label": "通用编码任务"})
+    return templates
+
+
+def get_task_template(template_id: str) -> dict[str, object]:
+    """返回指定任务类型的 6 要素填写模板。"""
+    normalized_id = template_id.strip().lower()
+    for profile_id, label, _keywords, template in PROFILE_RULES:
+        if normalized_id == profile_id:
+            return {"id": profile_id, "label": label, "recommended_fields": template}
+    if normalized_id == "generic":
+        return {"id": "generic", "label": "通用编码任务", "recommended_fields": DEFAULT_PROFILE_TEMPLATE}
+    known_ids = "、".join(template["id"] for template in list_task_templates())
+    raise ValueError(f"未知模板：{template_id}，可选值：{known_ids}")
 
 
 def build_task_profile(description: str) -> dict[str, object]:
