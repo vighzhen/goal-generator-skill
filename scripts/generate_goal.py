@@ -389,9 +389,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.template:
             _emit_output(json.dumps(get_task_template(args.template), ensure_ascii=False, indent=2), args.output_file)
             return 0
-        if args.template_md:
-            _emit_output(format_template_markdown(args.template_md), args.output_file)
-            return 0
         if args.profile:
             _emit_output(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -457,7 +454,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
-    parser.add_argument("--template-md", help="把指定任务类型模板渲染为适合 PR、Issue 或需求文档粘贴的 Markdown。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
@@ -502,37 +498,6 @@ def get_task_template(template_id: str) -> dict[str, object]:
         return {"id": "generic", "label": "通用编码任务", "recommended_fields": DEFAULT_PROFILE_TEMPLATE}
     known_ids = "、".join(template["id"] for template in list_task_templates())
     raise ValueError(f"未知模板：{template_id}，可选值：{known_ids}")
-
-
-def format_template_markdown(template_id: str) -> str:
-    """把内置任务类型模板渲染为便于人工协作的 Markdown。"""
-    template = get_task_template(template_id)
-    recommended_fields = template.get("recommended_fields", {})
-    field_values = recommended_fields if isinstance(recommended_fields, dict) else {}
-    template_id_value = str(template.get("id", template_id))
-    label = str(template.get("label", "未知模板"))
-    lines = [
-        f"# Goal Template: {label}",
-        "",
-        f"- 模板 ID：`{_markdown_inline(template_id_value)}`",
-        "- 使用场景：把下表粘贴到 PR、Issue 或需求文档，让需求方按 6 要素补齐信息。",
-        "- 后续命令：`python3 scripts/generate_goal.py --generate --from-json goal_fields.json`",
-        "",
-        "| 要素 | 推荐填写方向 |",
-        "| --- | --- |",
-    ]
-    for key in ELEMENT_ORDER:
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(ELEMENT_LABELS[key]),
-                    _markdown_cell(str(field_values.get(key, DEFAULT_PROFILE_TEMPLATE[key]))),
-                ]
-            )
-            + " |"
-        )
-    return "\n".join(lines)
 
 
 def validate_goal_file(goal_file: str) -> dict[str, object]:
