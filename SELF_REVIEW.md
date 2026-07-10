@@ -969,6 +969,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-explicit-fields"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、显式字段任务 `--dry-run --require-explicit-fields "Verification Surface,边界"` 通过并断言成功 1/跳过 0、示例清单 `--dry-run --require-explicit-fields verification,boundaries` 返回失败退出码并断言跳过任务包含 `登录接口Bug修复` 与“缺少显式要素”、真实生成与 `--lint-output` 组合均返回失败退出码并保留跳过原因、`--profile-tasks` 无效组合与未知字段参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 29 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 29 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 2990 行 sha256 bbb3127ad92c6dab、SKILL.md 144 行 sha256 afeb219410bfa028、README.md 482 行 sha256 10f7946e007ae779、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 28 轮显式来源门禁、默认填充门禁和批量生成前准备流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量关键字段禁用默认兜底门禁 | `--max-defaulted-fields` 只能限制默认字段总数，`--require-explicit-fields` 又要求字段必须来自 `fields` 或 description 标签；团队常见需求是允许从自然语言描述启发式识别字段，但禁止 verification、boundaries、blocked 等关键字段使用默认值兜底。当前只能人工查看 `defaulted` 列表或写外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--forbid-default-fields <字段列表>`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，只要指定字段出现在任务 `defaulted_keys` 中即跳过该任务并返回失败退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量关键字段禁用默认兜底门禁 | `--max-defaulted-fields` | 既有门禁按默认填充数量做总量限制；新功能按字段名称做精确限制，可表达“允许默认 iteration，但 verification/boundaries 绝不能默认”的策略。 | 通过 |
+| 批量关键字段禁用默认兜底门禁 | `--require-explicit-fields` | 显式来源门禁要求字段必须来自 `fields` 或 description 标签；新功能允许描述启发式命中，只禁止落到默认值兜底，严格程度和适用团队治理阶段不同。 | 通过 |
+| 批量关键字段禁用默认兜底门禁 | `--strict` / `--check` | `--strict` 禁止任何缺失要素使用默认值；新功能只禁止用户指定的关键字段默认化，保留非关键字段渐进补齐空间。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量关键字段禁用默认兜底门禁 | 团队批量任务清单中希望关键验证面、边界或受阻条件必须由描述或字段真实提供，但可以暂时允许低风险字段默认补全。 | 要么用 `--strict` 过度阻断所有默认值，要么用 `--max-defaulted-fields` 做粗粒度数量限制，或生成后人工检查每个任务的 `defaulted`。 | 一条命令指定禁止默认的关键字段，任务级报告保留跳过原因和建议，适合作为从宽松生成到完全 strict 之间的渐进 CI 门禁。 | 不是分数、来源标签或总量限制，而是面向默认兜底字段名称的策略门禁，补齐批量质量治理的中间形态。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -977,7 +1007,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 28 轮已完成，准备进入第 29 轮；累计修复 4 个已完成问题，新增 28 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 29 轮审查清单已建立，正在实现批量关键字段禁用默认兜底门禁；累计修复 4 个已完成问题，新增 28 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
