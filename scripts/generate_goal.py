@@ -488,6 +488,7 @@ def build_capabilities() -> dict[str, object]:
                 "--profile-summary",
                 "--score-summary",
                 "--score-report-md",
+                "--export-fields-json",
                 "--dedupe",
                 "--check",
                 "--strict",
@@ -591,6 +592,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量可执行度报告",
                 "scenario": "需要把每个任务的可执行度评分和下一步建议贴到 PR 或评审文档。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --score-report-md score_report.md",
+            },
+            {
+                "name": "批量字段草稿导出",
+                "scenario": "需要把批量任务先转成每个任务一份可编辑 6 要素 JSON，分发给需求方复核。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --export-fields-json field_drafts/",
             },
             {
                 "name": "批量缺失要素报告",
