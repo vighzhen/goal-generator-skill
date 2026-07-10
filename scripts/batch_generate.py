@@ -111,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         tasks = _load_tasks(_input_path_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
+        tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
         default_values = _load_default_values(args.defaults_json)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -138,6 +139,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
+    parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
@@ -168,6 +170,14 @@ def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
 
 def _task_matches_filter(task: TaskSpec, matcher: re.Pattern[str]) -> bool:
     return bool(matcher.search(task.name) or matcher.search(task.description))
+
+
+def _sort_tasks(tasks: list[TaskSpec], sort_by: str) -> list[TaskSpec]:
+    if sort_by == "input":
+        return tasks
+    if sort_by == "name":
+        return sorted(tasks, key=lambda task: task.name)
+    raise ValueError(f"不支持的排序方式：{sort_by}")
 
 
 def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
