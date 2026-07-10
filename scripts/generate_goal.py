@@ -363,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.profile:
             _emit_output(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.score:
+            _emit_output(json.dumps(score_description(args.score), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.explain_missing:
             _emit_output(
                 json.dumps(explain_missing_elements(args.explain_missing), ensure_ascii=False, indent=2),
@@ -398,6 +401,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
+    parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
@@ -444,6 +448,7 @@ def build_capabilities() -> dict[str, object]:
                 "--analyze",
                 "--questions",
                 "--profile",
+                "--score",
                 "--explain-missing",
                 "--list-templates",
                 "--template",
@@ -506,6 +511,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成任务画像",
                 "scenario": "追问前先判断任务类型、复杂度、风险和推荐填写方向。",
                 "command": "python3 scripts/generate_goal.py --profile '修复登录 API 在空 token 场景下偶发 500 的问题'",
+            },
+            {
+                "name": "评估可执行度",
+                "scenario": "快速判断一句需求距离可直接生成高质量 /goal 还差多少。",
+                "command": "python3 scripts/generate_goal.py --score '给项目加单元测试'",
             },
             {
                 "name": "解释缺失要素",
@@ -654,6 +664,103 @@ def build_task_profile(description: str) -> dict[str, object]:
         "present": analysis["present"],
         "recommended_fields": template,
     }
+
+
+def score_description(description: str) -> dict[str, object]:
+    """输出任务描述距离可直接生成高质量 /goal 的可执行度评分。"""
+    if not description.strip():
+        raise ValueError("--score 不能为空，请提供任务描述")
+    analysis = analyze_description(description)
+    profile = build_task_profile(description)
+    risk_score = _numeric_profile_value(profile, "risk_score")
+    score = _readiness_score(analysis["missing"], profile, risk_score)
+    level = _readiness_level(score)
+    return {
+        "readiness_score": score,
+        "readiness_level": level,
+        "missing_count": len(analysis["missing"]),
+        "missing": analysis["missing"],
+        "present": analysis["present"],
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": risk_score,
+        "task_type": profile.get("task_type", {}),
+        "complexity": profile.get("complexity", {}),
+        "reasons": _readiness_reasons(analysis["missing"], profile, risk_score),
+        "next_action": _readiness_next_action(level, analysis["missing"]),
+        "recommended_command": _readiness_recommended_command(level),
+    }
+
+
+def _numeric_profile_value(profile: dict[str, object], key: str) -> int:
+    value = profile.get(key, 0)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return 0
+
+
+def _readiness_score(missing: list[str], profile: dict[str, object], risk_score: int) -> int:
+    missing_penalty = len(missing) * 14
+    risk_penalty = min(risk_score // 4, 25)
+    complexity_penalty = _complexity_penalty(profile)
+    return max(0, min(100, 100 - missing_penalty - risk_penalty - complexity_penalty))
+
+
+def _complexity_penalty(profile: dict[str, object]) -> int:
+    complexity = profile.get("complexity", {})
+    level = complexity.get("level", "low") if isinstance(complexity, dict) else "low"
+    if level == "high":
+        return 10
+    if level == "medium":
+        return 5
+    return 0
+
+
+def _readiness_level(score: int) -> str:
+    if score >= 85:
+        return "ready"
+    if score >= 65:
+        return "needs_review"
+    if score >= 40:
+        return "incomplete"
+    return "high_risk"
+
+
+def _readiness_reasons(missing: list[str], profile: dict[str, object], risk_score: int) -> list[str]:
+    reasons: list[str] = []
+    if missing:
+        reasons.append(f"缺失 {len(missing)} 个必要要素：{_labels_for_keys(missing)}")
+    else:
+        reasons.append("6 个必要要素均已识别")
+    if risk_score:
+        reasons.append(f"任务风险评分为 {risk_score}，风险等级为 {profile.get('risk_level', 'unknown')}")
+    complexity = profile.get("complexity", {})
+    if isinstance(complexity, dict):
+        level = complexity.get("level", "unknown")
+        complexity_reasons = complexity.get("reasons", [])
+        if isinstance(complexity_reasons, list):
+            reasons.append(f"复杂度为 {level}：{'；'.join(str(reason) for reason in complexity_reasons)}")
+    return reasons
+
+
+def _labels_for_keys(keys: list[str]) -> str:
+    return "、".join(ELEMENT_LABELS[key] for key in keys)
+
+
+def _readiness_next_action(level: str, missing: list[str]) -> str:
+    if level == "ready":
+        return "可以进入 --generate；仍建议人工快速复核边界、验证命令和受阻条件。"
+    if level == "needs_review":
+        return "建议先复核风险和缺失项，再补齐少量关键信息后生成 /goal。"
+    labels = _labels_for_keys(missing) if missing else "风险项"
+    return f"先补齐或确认：{labels}；可使用 --explain-missing 生成可发送的追问文案。"
+
+
+def _readiness_recommended_command(level: str) -> str:
+    if level == "ready":
+        return "python3 scripts/generate_goal.py --generate ..."
+    return "python3 scripts/generate_goal.py --explain-missing '<任务描述>'"
 
 
 def explain_missing_elements(description: str) -> dict[str, object]:

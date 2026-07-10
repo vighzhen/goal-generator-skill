@@ -53,6 +53,16 @@ python3 scripts/generate_goal.py --profile "修复登录 API 在空 token 场景
 
 该功能适合把一句话需求快速转成“应该追问什么、优先确认什么、风险在哪里、每个要素怎么写”的模板化建议。
 
+### 评估任务可执行度
+
+使用 `--score` 可快速得到任务描述距离“可直接生成高质量 `/goal`”的评分、等级、缺失项、风险和下一步建议：
+
+```bash
+python3 scripts/generate_goal.py --score "给项目加单元测试"
+```
+
+该功能适合在接到一句话需求时先做质量门禁，判断是直接生成、简单复核还是必须补信息。
+
 ### 解释缺失要素
 
 使用 `--explain-missing` 可在 `--analyze` 的缺失项基础上进一步输出“为什么缺、优先补什么、推荐怎么填”和可直接发送给用户的追问文案：
@@ -299,6 +309,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 文档生成
 - 批量任务指令生成（JSON、JSONL、CSV、YAML、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
+- 单任务 `/goal` 可执行度评分和下一步建议
 - 缺失 6 要素的原因解释、优先级和补全建议
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 机器可读能力清单输出
