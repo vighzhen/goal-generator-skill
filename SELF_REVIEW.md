@@ -172,6 +172,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --lint-fields-json /tmp/good_fields.json`、低质量字段 JSON 失败退出码验证、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
+## 第 6 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 6 轮要求重新通读全部 7 个范围内文件及前 5 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮聚焦提升代码路径画像的真实项目验证命令发现能力。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 项目验证命令发现 | `--inspect-path` 当前主要按后缀和少量文件名给出泛化验证提示，例如 Node 项目只提示“npm test（如项目 package.json 定义了 test 脚本）”，用户仍需要手动查看 `package.json`、`Makefile`、`pyproject.toml`、`go.mod` 或 `Cargo.toml` 才能写出可执行验证命令。 | 在 `scripts/generate_goal.py` 的路径扫描流程中读取目标路径附近的常见项目配置，提取 package scripts、Makefile 目标、pytest/ruff/mypy/tox 线索、Go/Rust 配置，并把发现到的命令写入 `verification_hints` 与独立 `project_validation` 结构；同步更新 README 和 SKILL。 | 待实现 | 待回填 |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 项目验证命令发现 | `--inspect-path` 后缀级验证提示 | 现有提示只基于语言后缀和少量文件存在性；新功能读取真实项目配置文件，产出可直接执行的项目命令和来源证据，显著减少人工查配置步骤。 | 通过 |
+| 项目验证命令发现 | `--profile` 推荐验证填写方向 | `--profile` 从自然语言任务类型推荐通用验证思路；新功能从本地仓库配置推断具体命令，输入来源和结果粒度不同。 | 通过 |
+| 项目验证命令发现 | `--lint-fields-json` 语义质量检查 | 语义质量检查评估已有字段是否具体；新功能在字段形成前主动补充真实验证命令素材，不是同一报告的变体。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 项目验证命令发现 | 用户只有本地路径和目标描述，需要把真实项目测试、lint、类型检查或构建命令写进 `/goal` 验证面。 | 手动打开 `package.json`、`Makefile`、`pyproject.toml` 等配置，猜哪些命令适合本次任务；或者接受泛化提示后再人工补全。 | 路径画像直接给出带来源的可执行命令，`suggested_fields.verification` 更贴近真实项目，减少生成前追问和人工查配置。 | 从“后缀推断”升级为“配置证据推断”，属于核心分析能力增强和新信息源接入，不是输出样式变化。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 6 轮审查清单，计划实现 1 个项目验证命令发现功能。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -180,7 +214,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 5 轮，准备进入第 6 轮；累计修复 2 个问题，新增 5 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 6 轮；累计修复 2 个问题，新增 5 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
