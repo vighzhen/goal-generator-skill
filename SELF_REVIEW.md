@@ -697,6 +697,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --help | grep -n "lint-goal-path"`、`--lint-goal-path` 对单个高质量 `/goal` 文件返回 `auto_mode=file` 并通过、对高质量合集返回 `auto_mode=bundle_file` 并通过、对低质量合集返回失败退出码和失败块、对目录树返回 `auto_mode=directory_tree` 并递归检查、对含失败合集的目录树返回失败退出码、对不存在路径返回参数错误、完整 `--generate` 端到端生成并用 `--lint-goal-file` 与 `--lint-goal-path` 复核通过、`git diff --check`。
 
+## 第 21 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 21 轮要求重新读取全部 7 个范围内文件，复核单任务 `--profile`、批量 dry-run/check、批量依赖/路径/质量门禁和第 20 轮统一路径质量门禁；暂未发现新的 P0/P1 缺陷，本轮聚焦把单任务画像能力扩展到批量任务组合层面。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务画像矩阵 | 团队维护 JSON/CSV 批量任务清单时，`--profile` 只能逐条分析自然语言描述，无法一次性看出任务类型分布、复杂度分布、风险层级和哪些任务仍缺关键 6 要素；现有 `--dry-run` 只看完整度，不给任务类型/风险组合视角。 | 在 `scripts/batch_generate.py` 新增 `--profile-tasks` 模式，逐任务复用单任务画像和字段完整度合并逻辑，输出任务类型、复杂度、风险分数/层级、缺失要素、类型/复杂度/风险汇总；支持 `--filter`、`--limit`、`--sort-by`、`--dedupe`、`--summary-only`、`--report-json` 和 `--fail-on-skipped`。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务画像矩阵 | `scripts/generate_goal.py --profile` | 单任务画像只能分析一条描述；新功能读取批量清单并输出组合分布、任务级风险和缺失要素汇总，覆盖批量治理场景。 | 通过 |
+| 批量任务画像矩阵 | `scripts/batch_generate.py --dry-run` / `--check` | dry-run/check 关注能否生成和缺失要素；新功能额外提供任务类型、复杂度、风险层级和推荐模板分布，帮助规划执行顺序和审核重点。 | 通过 |
+| 批量任务画像矩阵 | `--plan-dependencies` / `--dependency-order` | 依赖计划关注任务间先后关系；画像矩阵关注任务自身类型与风险，不处理依赖图。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务画像矩阵 | 批量任务清单进入生成或分派前，需要快速知道其中测试、Bug、重构、文档等任务占比，哪些任务高风险或仍缺要素。 | 对每条任务手动运行 `--profile`，再复制结果到表格统计；或者只看 `--dry-run`，无法获得风险和类型组合视图。 | 一条命令产出组合画像和机器可读报告，便于 CI、评审和任务拆分前发现高风险/高复杂任务。 | 不是单任务画像的格式变体，而是新增批量聚合、统计和任务清单治理能力。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -705,7 +735,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 20 轮 `/goal` 路径自动质量门禁，准备进入第 21 轮持续进化；累计修复 4 个已完成问题，新增 20 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 21 轮审查清单已建立，正在实现批量任务画像矩阵；累计修复 4 个已完成问题，新增 20 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
