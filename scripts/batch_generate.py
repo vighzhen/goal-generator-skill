@@ -137,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         print("--lint-output 只能用于真实批量生成模式，请勿与分析、检查或清单模式同用。", file=sys.stderr)
         return 1
+    if args.fail_on_high_risk and not args.profile_tasks:
+        print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
+        return 1
     if args.merge_supplements:
         try:
             return _run_merge_supplements_mode(tasks, args, start_time)
@@ -232,6 +235,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dependency-order", action="store_true", help="按 depends_on/dependencies 拓扑顺序处理批量任务。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
+    parser.add_argument("--fail-on-high-risk", action="store_true", help="配合 --profile-tasks，高风险任务存在时以退出码 1 结束。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
     parser.add_argument("--profile-tasks", action="store_true", help="批量识别任务类型、复杂度、风险和 6 要素缺口。")
@@ -389,6 +393,8 @@ def _run_batch_profile_mode(tasks: list[TaskSpec], args: argparse.Namespace, sta
         _write_batch_profile_report(profile_report, skipped_tasks, stats, Path(args.report_json))
     print(_format_batch_profile_summary(profile_report, len(skipped_tasks), elapsed_seconds))
     fail_on_skipped = args.fail_on_skipped or args.check
+    if args.fail_on_high_risk and int(profile_report["high_risk_count"]):
+        return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
