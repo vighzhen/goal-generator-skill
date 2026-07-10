@@ -499,7 +499,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量路径上下文画像 | 第 1/6 轮的 `--inspect-path` 能扫描一个本地路径并给出边界、验证命令和风险线索，但团队任务清单常包含多个模块或目录；当前需要逐条运行单任务扫描并手工汇总，难以在批量生成前统一补齐真实代码上下文。 | 在 `scripts/batch_generate.py` 新增任务级 `path`/`inspect_path`/`target_path` 字段和 `--inspect-paths` 模式，批量调用 `inspect_path_context`，按任务输出语言分布、验证命令、风险和建议字段；支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--summary-only`/`--report-json` 与 CI 失败退出。 | 待实现 | - |
+| 1 | 批量路径上下文画像 | 第 1/6 轮的 `--inspect-path` 能扫描一个本地路径并给出边界、验证命令和风险线索，但团队任务清单常包含多个模块或目录；当前需要逐条运行单任务扫描并手工汇总，难以在批量生成前统一补齐真实代码上下文。 | 在 `scripts/batch_generate.py` 新增任务级 `path`/`inspect_path`/`target_path` 字段和 `--inspect-paths` 模式，批量调用 `inspect_path_context`，按任务输出语言分布、验证命令、风险和建议字段；支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--summary-only`/`--report-json` 与 CI 失败退出。 | 已实现 | 3251992 |
 
 #### 去重审查
 
@@ -516,6 +516,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量路径上下文画像 | 多个批量任务各自指向不同目录或文件，需要在统一生成 `/goal` 前扫描真实代码结构、测试线索和项目验证命令。 | 为每个任务复制路径逐条运行 `generate_goal.py --inspect-path`，再人工拼接报告和建议字段，容易漏掉某个模块或路径错误。 | 一条命令完成整批路径扫描，报告每个任务的 `suggested_fields`、验证命令、风险和错误，可作为批量字段补全或追问依据。 | 从单路径扫描扩展到任务清单级代码事实采集，新增批量输入字段、任务级错误定位和 CI 门禁，不是单纯输出格式变体。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "inspect-paths"`、含有效与无效路径的 JSON `--inspect-paths --report-json`（无效路径失败退出码验证）、有效 JSON `--inspect-paths --summary-only --report-json`、CSV `path` 列 `--inspect-paths --report-json`、`--filter`/`--limit`/`--sort-by`/`--dedupe` 组合扫描、`--output-file` 写出扫描报告、`--merge-supplements` 保留 `inspect_path` 验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -524,7 +528,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 14 轮，第 15 轮审查清单已创建且待实现能力增强；累计修复 2 个问题，新增 14 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 15 轮，下一轮将进入第 16 轮审查；累计修复 2 个问题，新增 15 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -541,4 +545,5 @@
 - 第 12 轮：批量缺失信息追问文案（feb36ed）
 - 第 13 轮：批量补充回答合并（7fc61f7）
 - 第 14 轮：批量生成输出自检门禁（b8469e8）
-剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--lint-output` 复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
+- 第 15 轮：批量路径上下文画像（3251992）
+剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--lint-output` 复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
