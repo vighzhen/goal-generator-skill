@@ -162,6 +162,7 @@ JSON 输入格式：
   {
     "name": "代码质量优化",
     "description": "对50个非测试Python文件做7维度代码质量优化",
+    "depends_on": [],
     "fields": {
       "outcome": "对50个非测试 Python 文件做 7 维度代码质量优化",
       "verification": "每个改动后执行 python -m py_compile"
@@ -170,10 +171,10 @@ JSON 输入格式：
 ]
 ```
 
-CSV 输入格式包含以下表头：
+CSV 输入格式支持以下表头（`depends_on`/`dependencies` 可选，6 要素列可按需填写）：
 
 ```csv
-name,description,outcome,verification,constraints,boundaries,iteration,blocked
+name,description,depends_on,outcome,verification,constraints,boundaries,iteration,blocked
 ```
 
 常用命令：
@@ -218,6 +219,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 只预览将要处理的任务名称，适合检查 filter/sort/limit 是否命中正确范围
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --list-tasks --filter "测试|Bug"
 
+# 生成依赖执行计划，检查 depends_on/dependencies 是否存在未知依赖或循环依赖
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --plan-dependencies --report-json dependency_plan.json
+
 # 按任务名稳定排序输出，适合多人维护的大清单审计和结果比对
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --sort-by name
 
@@ -238,11 +242,13 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 
 - `--input` 和位置参数都可指定输入文件；推荐在脚本中显式使用 `--input`。
 - 当前批量输入只支持 JSON 和 CSV，其他格式不再作为核心能力维护。
+- JSON 任务可选 `depends_on` 或 `dependencies` 字段；CSV 可选 `depends_on` 或 `dependencies` 表头，多个依赖用逗号、分号、顿号或换行分隔。
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--defaults-json <path>` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 可覆盖默认填充策略。
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
+- `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
 
 ## 6 个必要要素
 
@@ -274,6 +280,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
+- 批量任务依赖计划、未知依赖和循环依赖检查
 - 批量 JSON 报告、输出目录、输出文件、团队默认值配置
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。

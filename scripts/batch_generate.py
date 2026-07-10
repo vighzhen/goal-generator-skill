@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ TASK_SEPARATOR = "\n\n"
 SUMMARY_TEMPLATE = "处理完成：成功 {success_count} 个，跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
 DEFAULTS_JSON_ENV = "GOAL_GENERATOR_DEFAULTS_JSON"
 CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
+DEPENDENCY_SPLIT_PATTERN = re.compile(r"[,;，；、\n]+")
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
     "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容"),
@@ -46,6 +47,7 @@ class TaskSpec:
     name: str
     description: str
     fields: dict[str, str]
+    depends_on: list[str] = field(default_factory=list)
     load_error: str = ""
 
 
@@ -103,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.plan_dependencies:
+        return _run_dependency_plan_mode(tasks, args, start_time)
     if args.list_tasks:
         return _run_list_tasks_mode(tasks, args)
     try:
@@ -146,6 +150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
+    parser.add_argument("--plan-dependencies", action="store_true", help="根据 depends_on/dependencies 字段输出批量任务依赖执行计划。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -216,6 +221,207 @@ def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int
     return 0
 
 
+def _run_dependency_plan_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    planned_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    plan = _build_dependency_plan(planned_tasks)
+    summary_only = args.summary_only or args.check
+    if not summary_only:
+        print(_format_dependency_plan(plan))
+    elapsed_seconds = time.perf_counter() - start_time
+    issue_count = len(plan["issues"]) if isinstance(plan.get("issues"), list) else 0
+    stats = BatchStats(len(planned_tasks), len(skipped_tasks) + issue_count, elapsed_seconds)
+    if args.report_json:
+        _write_dependency_plan_report(plan, skipped_tasks, stats, Path(args.report_json))
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if not plan.get("valid", False):
+        return 1
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
+def _build_dependency_plan(tasks: list[TaskSpec]) -> dict[str, object]:
+    ordered_tasks = _unique_tasks_by_name(tasks)
+    known_names = {task.name for task in ordered_tasks}
+    duplicate_names = _duplicate_task_names(tasks)
+    issues = _dependency_duplicate_issues(duplicate_names)
+    dependencies_by_task = {
+        task.name: [dependency for dependency in task.depends_on if dependency in known_names and dependency != task.name]
+        for task in ordered_tasks
+    }
+    issues.extend(_dependency_reference_issues(ordered_tasks, known_names))
+    waves, cycle_names = _dependency_waves(ordered_tasks, dependencies_by_task)
+    issues.extend(_dependency_cycle_issues(cycle_names))
+    wave_by_task = _wave_index_by_task(waves)
+    return {
+        "valid": not issues,
+        "task_count": len(ordered_tasks),
+        "waves": [
+            {"wave": index, "tasks": [_dependency_task_entry(task, dependencies_by_task, wave_by_task) for task in wave_tasks]}
+            for index, wave_tasks in enumerate(waves, start=1)
+        ],
+        "tasks": [_dependency_task_entry(task, dependencies_by_task, wave_by_task) for task in ordered_tasks],
+        "issues": issues,
+    }
+
+
+def _unique_tasks_by_name(tasks: list[TaskSpec]) -> list[TaskSpec]:
+    unique_tasks: list[TaskSpec] = []
+    seen: set[str] = set()
+    for task in tasks:
+        if task.name in seen:
+            continue
+        unique_tasks.append(task)
+        seen.add(task.name)
+    return unique_tasks
+
+
+def _duplicate_task_names(tasks: list[TaskSpec]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for task in tasks:
+        if task.name in seen:
+            duplicates.add(task.name)
+        seen.add(task.name)
+    return sorted(duplicates)
+
+
+def _dependency_duplicate_issues(duplicate_names: list[str]) -> list[dict[str, str]]:
+    return [
+        _dependency_issue(
+            name,
+            "重复任务名会导致依赖引用不唯一",
+            "为重复任务改名，或先使用 --dedupe 只保留一份任务。",
+        )
+        for name in duplicate_names
+    ]
+
+
+def _dependency_reference_issues(tasks: list[TaskSpec], known_names: set[str]) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for task in tasks:
+        for dependency in task.depends_on:
+            if dependency == task.name:
+                issues.append(
+                    _dependency_issue(task.name, f"任务依赖自身：{dependency}", "移除自身依赖，或拆成两个命名不同的任务。")
+                )
+            elif dependency not in known_names:
+                issues.append(
+                    _dependency_issue(
+                        task.name,
+                        f"依赖不存在：{dependency}",
+                        "确认依赖任务名称是否拼写一致，或把被依赖任务加入同一批输入文件。",
+                    )
+                )
+    return issues
+
+
+def _dependency_waves(
+    tasks: list[TaskSpec],
+    dependencies_by_task: dict[str, list[str]],
+) -> tuple[list[list[TaskSpec]], list[str]]:
+    task_by_name = {task.name: task for task in tasks}
+    order_index = {task.name: index for index, task in enumerate(tasks)}
+    dependents: dict[str, list[str]] = {task.name: [] for task in tasks}
+    indegree: dict[str, int] = {task.name: 0 for task in tasks}
+    for task_name, dependencies in dependencies_by_task.items():
+        for dependency in dependencies:
+            dependents[dependency].append(task_name)
+            indegree[task_name] += 1
+
+    ready = [task.name for task in tasks if indegree[task.name] == 0]
+    waves: list[list[TaskSpec]] = []
+    processed: set[str] = set()
+    while ready:
+        current_names = sorted(ready, key=lambda name: order_index[name])
+        waves.append([task_by_name[name] for name in current_names])
+        processed.update(current_names)
+        next_ready: list[str] = []
+        for name in current_names:
+            for dependent in sorted(dependents[name], key=lambda item: order_index[item]):
+                indegree[dependent] -= 1
+                if indegree[dependent] == 0:
+                    next_ready.append(dependent)
+        ready = next_ready
+    cycle_names = [task.name for task in tasks if task.name not in processed]
+    return waves, cycle_names
+
+
+def _dependency_cycle_issues(cycle_names: list[str]) -> list[dict[str, str]]:
+    return [
+        _dependency_issue(
+            name,
+            "存在循环依赖或被循环依赖阻塞",
+            "拆分或改写 depends_on，确保依赖方向形成无环图。",
+        )
+        for name in cycle_names
+    ]
+
+
+def _wave_index_by_task(waves: list[list[TaskSpec]]) -> dict[str, int]:
+    wave_by_task: dict[str, int] = {}
+    for wave_index, tasks in enumerate(waves, start=1):
+        for task in tasks:
+            wave_by_task[task.name] = wave_index
+    return wave_by_task
+
+
+def _dependency_task_entry(
+    task: TaskSpec,
+    dependencies_by_task: dict[str, list[str]],
+    wave_by_task: dict[str, int],
+) -> dict[str, object]:
+    return {
+        "name": task.name,
+        "depends_on": task.depends_on,
+        "known_depends_on": dependencies_by_task.get(task.name, []),
+        "wave": wave_by_task.get(task.name),
+    }
+
+
+def _dependency_issue(task_name: str, reason: str, suggestion: str) -> dict[str, str]:
+    return {"name": task_name, "reason": reason, "suggestion": suggestion}
+
+
+def _format_dependency_plan(plan: dict[str, object]) -> str:
+    lines = ["依赖执行计划："]
+    waves = plan.get("waves", [])
+    if not isinstance(waves, list) or not waves:
+        lines.append("无可执行任务。")
+    else:
+        for wave in waves:
+            if not isinstance(wave, dict):
+                continue
+            tasks = wave.get("tasks", [])
+            task_labels = _format_dependency_wave_tasks(tasks if isinstance(tasks, list) else [])
+            lines.append(f"第 {wave.get('wave')} 批：{task_labels}")
+    issues = plan.get("issues", [])
+    if isinstance(issues, list) and issues:
+        lines.append("")
+        lines.append("依赖问题：")
+        for issue in issues:
+            if isinstance(issue, dict):
+                lines.append(f"- {issue.get('name', '未知任务')}：{issue.get('reason', '')}；建议：{issue.get('suggestion', '')}")
+    else:
+        lines.append("")
+        lines.append("依赖检查：通过。")
+    return "\n".join(lines)
+
+
+def _format_dependency_wave_tasks(tasks: list[object]) -> str:
+    if not tasks:
+        return "无"
+    labels: list[str] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        dependencies = task.get("known_depends_on", [])
+        dependency_label = "无" if not dependencies else "、".join(str(dependency) for dependency in dependencies)
+        labels.append(f"{task.get('name', '未知任务')}（依赖：{dependency_label}）")
+    return "；".join(labels) if labels else "无"
+
+
 def _dedupe_preview_tasks(tasks: list[TaskSpec], dedupe: bool) -> tuple[list[TaskSpec], list[SkippedTask]]:
     if not dedupe:
         return tasks, []
@@ -275,7 +481,8 @@ def _task_from_json_item(item: dict[str, Any], index: int) -> TaskSpec:
     name = _string_value(item.get("name")) or _default_task_name(index)
     description = _string_value(item.get("description"))
     fields = _fields_from_mapping(item.get("fields"))
-    return TaskSpec(name=name, description=description, fields=fields)
+    depends_on = _dependency_names(item.get("depends_on", item.get("dependencies")))
+    return TaskSpec(name=name, description=description, fields=fields, depends_on=depends_on)
 
 
 
@@ -290,7 +497,30 @@ def _task_from_csv_row(row: dict[str, str | None], index: int) -> TaskSpec:
     name = _string_value(row.get("name")) or _default_task_name(index)
     description = _string_value(row.get("description"))
     fields = {key: _string_value(row.get(key)) for key in ELEMENT_ORDER}
-    return TaskSpec(name=name, description=description, fields=_remove_empty_fields(fields))
+    depends_on = _dependency_names(row.get("depends_on") or row.get("dependencies"))
+    return TaskSpec(name=name, description=description, fields=_remove_empty_fields(fields), depends_on=depends_on)
+
+
+def _dependency_names(raw_dependencies: Any) -> list[str]:
+    if raw_dependencies is None:
+        return []
+    if isinstance(raw_dependencies, list):
+        return _dedupe_dependency_names(_string_value(item) for item in raw_dependencies)
+    if isinstance(raw_dependencies, str):
+        return _dedupe_dependency_names(DEPENDENCY_SPLIT_PATTERN.split(raw_dependencies))
+    return _dedupe_dependency_names([_string_value(raw_dependencies)])
+
+
+def _dedupe_dependency_names(raw_names: Any) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in raw_names:
+        name = _string_value(raw_name)
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
+    return names
 
 
 def _fields_from_mapping(raw_fields: Any) -> dict[str, str]:
@@ -571,8 +801,25 @@ def _write_task_list_report(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_dependency_plan_report(
+    plan: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "dependency_plan": plan,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _task_list_report(task: TaskSpec) -> dict[str, object]:
-    return {"name": task.name, "description": task.description}
+    return {"name": task.name, "description": task.description, "depends_on": task.depends_on}
 
 
 def _task_report(
