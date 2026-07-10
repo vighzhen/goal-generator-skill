@@ -186,7 +186,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 项目验证命令发现 | `--inspect-path` 当前主要按后缀和少量文件名给出泛化验证提示，例如 Node 项目只提示“npm test（如项目 package.json 定义了 test 脚本）”，用户仍需要手动查看 `package.json`、`Makefile`、`pyproject.toml`、`go.mod` 或 `Cargo.toml` 才能写出可执行验证命令。 | 在 `scripts/generate_goal.py` 的路径扫描流程中读取目标路径附近的常见项目配置，提取 package scripts、Makefile 目标、pytest/ruff/mypy/tox 线索、Go/Rust 配置，并把发现到的命令写入 `verification_hints` 与独立 `project_validation` 结构；同步更新 README 和 SKILL。 | 待实现 | 待回填 |
+| 1 | 项目验证命令发现 | `--inspect-path` 当前主要按后缀和少量文件名给出泛化验证提示，例如 Node 项目只提示“npm test（如项目 package.json 定义了 test 脚本）”，用户仍需要手动查看 `package.json`、`Makefile`、`pyproject.toml`、`go.mod` 或 `Cargo.toml` 才能写出可执行验证命令。 | 在 `scripts/generate_goal.py` 的路径扫描流程中读取目标路径附近的常见项目配置，提取 package scripts、Makefile 目标、pytest/ruff/mypy/tox 线索、Go/Rust 配置，并把发现到的命令写入 `verification_hints` 与独立 `project_validation` 结构；同步更新 README 和 SKILL。 | 已实现 | 67fad6c |
 
 #### 去重审查
 
@@ -204,7 +204,7 @@
 
 ### 本轮总结
 
-进行中：已完成第 6 轮审查清单，计划实现 1 个项目验证命令发现功能。
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、含 `package.json`/`Makefile`/`pyproject.toml` 临时项目的 `--inspect-path` 项目验证命令发现断言、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
 ## 用户纠正记录
 
@@ -214,7 +214,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 6 轮；累计修复 2 个问题，新增 5 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 6 轮，准备进入第 7 轮；累计修复 2 个问题，新增 6 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -222,4 +222,5 @@
 - 第 3 轮：英文任务描述理解（e4e487d）
 - 第 4 轮：原始需求与补充回答合并（d49a240）
 - 第 5 轮：6 要素语义质量检查（9042f35）
-剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令；批量依赖计划依赖用户显式填写准确任务名；英文识别、上下文合并和语义质量检查均为启发式规则，复杂长句、领域缩写、多意图补充或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段和质量门禁结论。
+- 第 6 轮：项目验证命令发现（67fad6c）
+剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划依赖用户显式填写准确任务名；英文识别、上下文合并和语义质量检查均为启发式规则，复杂长句、领域缩写、多意图补充或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段和质量门禁结论。
