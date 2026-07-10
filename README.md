@@ -185,6 +185,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 只处理任务名或描述匹配正则的任务，适合从大清单中重跑某一类任务
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --filter "测试|Bug"
 
+# 只处理前 2 个任务，适合大清单首次接入时快速试跑
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --limit 2
+
 # 跳过重复任务，适合多人维护或多来源合并后的任务清单
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --dedupe --report-json batch_report.json
 
@@ -198,7 +201,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、跳过原因和修复建议，方便自动化集成。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、跳过原因和修复建议，方便自动化集成。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--limit <N>`，脚本只处理筛选后的前 N 个任务，适合首次试跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
 
 ## 6 个必要要素
 

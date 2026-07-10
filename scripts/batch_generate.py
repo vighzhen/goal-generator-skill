@@ -111,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         tasks = _load_tasks(_input_path_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
+        tasks = _limit_tasks(tasks, args.limit)
         default_values = _load_default_values(args.defaults_json)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
@@ -137,6 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
+    parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -166,6 +168,14 @@ def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
 
 def _task_matches_filter(task: TaskSpec, matcher: re.Pattern[str]) -> bool:
     return bool(matcher.search(task.name) or matcher.search(task.description))
+
+
+def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
+    if limit is None:
+        return tasks
+    if limit < 1:
+        raise ValueError("--limit 必须是大于 0 的整数")
+    return tasks[:limit]
 
 
 def _load_default_values(defaults_json: str | None) -> dict[str, str]:
