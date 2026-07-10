@@ -543,7 +543,6 @@ def build_capabilities() -> dict[str, object]:
                 "--profile-summary",
                 "--score-summary",
                 "--score-report-md",
-                "--questions-md",
                 "--redaction-report-md",
                 "--draft-jsonl",
                 "--fail-below-score",
@@ -672,11 +671,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量可执行度报告",
                 "scenario": "需要把每个任务的可执行度评分和下一步建议贴到 PR 或评审文档。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --score-report-md score_report.md",
-            },
-            {
-                "name": "批量追问 Markdown 包",
-                "scenario": "团队希望把每个任务需要补的信息整理成可直接发送给需求方的追问文案。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --questions-md questions.md",
             },
             {
                 "name": "批量敏感信息报告",

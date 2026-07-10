@@ -21,7 +21,6 @@ from generate_goal import (
     _extract_labeled_fields,
     analyze_description,
     build_task_profile,
-    build_question_pack,
     build_goal_json_draft,
     check_redaction,
     render_goal_text,
@@ -125,12 +124,6 @@ class TaskScoreSummary:
 
 
 @dataclass(frozen=True)
-class TaskQuestionPack:
-    task: TaskSpec
-    pack: dict[str, object]
-
-
-@dataclass(frozen=True)
 class FieldsExport:
     task_name: str
     output_path: str
@@ -181,8 +174,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_draft_jsonl_mode(tasks, args)
     if args.redaction_report_md:
         return _run_redaction_report_mode(tasks, args)
-    if args.questions_md:
-        return _run_questions_markdown_mode(tasks, args)
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
@@ -250,7 +241,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
-    parser.add_argument("--questions-md", help="把每个任务可直接发送给需求方的缺失要素追问写入 Markdown 包。")
     parser.add_argument("--redaction-report-md", help="把批量任务中的敏感信息发现、脱敏预览和处理建议写入 Markdown 报告。")
     parser.add_argument("--draft-jsonl", help="把每个任务的 Goal JSON 草稿写入单个 JSONL 文件，适合流水线逐行消费。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
@@ -422,23 +412,6 @@ def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int 
             f"({score.get('readiness_level', 'unknown')})",
             file=sys.stderr,
         )
-
-
-def _run_questions_markdown_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    start_time = time.perf_counter()
-    question_packs, skipped_tasks = _build_question_packs(tasks, args.dedupe)
-    stats = BatchStats(len(question_packs), len(skipped_tasks), time.perf_counter() - start_time)
-    questions_path = Path(args.questions_md)
-    _write_questions_markdown(question_packs, skipped_tasks, stats, questions_path)
-    if args.report_json:
-        _write_question_pack_report(question_packs, skipped_tasks, stats, Path(args.report_json))
-    if not args.summary_only:
-        print(f"已写入追问 Markdown 包：{questions_path}")
-    print(_format_summary(stats))
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    return 0
 
 
 def _run_draft_jsonl_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
@@ -685,29 +658,6 @@ def _build_score_summaries(
             continue
         scored_tasks.append(TaskScoreSummary(task, score_description(task.description)))
     return scored_tasks, skipped_tasks
-
-
-def _build_question_packs(
-    tasks: list[TaskSpec],
-    dedupe: bool,
-) -> tuple[list[TaskQuestionPack], list[SkippedTask]]:
-    question_packs: list[TaskQuestionPack] = []
-    skipped_tasks: list[SkippedTask] = []
-    seen_task_keys: set[str] = set()
-    for task in tasks:
-        if dedupe and _is_duplicate_task(task, seen_task_keys):
-            reason = "重复任务：任务名和描述已出现过"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        if task.load_error:
-            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
-            continue
-        if not task.description:
-            reason = "缺少 description"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        question_packs.append(TaskQuestionPack(task, build_question_pack(task.description)))
-    return question_packs, skipped_tasks
 
 
 def _print_profile_summary(profiled_tasks: list[TaskProfileSummary]) -> None:
@@ -1677,30 +1627,6 @@ def _draft_jsonl_report_item(draft: GoalJsonDraft) -> dict[str, object]:
     }
 
 
-def _write_question_pack_report(
-    question_packs: list[TaskQuestionPack],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "success_count": stats.success_count,
-        "skipped_count": stats.skipped_count,
-        "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "tasks": [
-            {
-                "name": question_pack.task.name,
-                "description": question_pack.task.description,
-                "question_pack": question_pack.pack,
-            }
-            for question_pack in question_packs
-        ],
-        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
 def _write_score_report_markdown(
     scored_tasks: list[TaskScoreSummary],
     skipped_tasks: list[SkippedTask],
@@ -1733,33 +1659,6 @@ def _write_score_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _write_questions_markdown(
-    question_packs: list[TaskQuestionPack],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    questions_path: Path,
-) -> None:
-    questions_path.parent.mkdir(parents=True, exist_ok=True)
-    needs_questions = [question_pack for question_pack in question_packs if _question_pack_missing(question_pack.pack)]
-    lines = [
-        "# Batch Goal Question Pack",
-        "",
-        f"- 可评审任务：{stats.success_count}",
-        f"- 需要补信息：{len(needs_questions)}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-    ]
-    if not question_packs:
-        lines.append("无可追问任务。")
-    for index, question_pack in enumerate(question_packs, start=1):
-        lines.extend(_question_pack_markdown_section(index, question_pack))
-        lines.append("")
-    lines.extend(["## 跳过任务", ""])
-    lines.extend(_markdown_skipped_table(skipped_tasks))
-    questions_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 def _write_redaction_report_markdown(
@@ -1824,62 +1723,6 @@ def _redaction_types_cell(check: dict[str, object]) -> str:
     types = check.get("finding_types", [])
     type_values = [str(item) for item in types] if isinstance(types, list) else []
     return ",".join(type_values) if type_values else "无"
-
-
-def _question_pack_markdown_section(index: int, question_pack: TaskQuestionPack) -> list[str]:
-    pack = question_pack.pack
-    lines = [
-        f"## {index}. {_markdown_cell(question_pack.task.name)}",
-        "",
-        f"- 可执行度：{pack.get('readiness_score', '')}/100（{pack.get('readiness_level', 'unknown')}）",
-        f"- 风险：{pack.get('risk_level', 'unknown')}（{pack.get('risk_score', '')}）",
-        f"- 缺失要素：{_format_labels(_question_pack_missing(pack))}",
-        "",
-        "### 可直接发送的追问",
-        "",
-    ]
-    lines.extend(_markdown_quote_block(str(pack.get("next_prompt", ""))))
-    lines.extend(["", "### 结构化问题", ""])
-    lines.extend(_question_pack_markdown_table(pack))
-    return lines
-
-
-def _question_pack_missing(pack: dict[str, object]) -> list[str]:
-    missing = pack.get("missing", [])
-    return [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
-
-
-def _markdown_quote_block(value: str) -> list[str]:
-    stripped = value.strip()
-    if not stripped:
-        return ["> 无追问内容。"]
-    return [f"> {line}" if line else ">" for line in stripped.splitlines()]
-
-
-def _question_pack_markdown_table(pack: dict[str, object]) -> list[str]:
-    questions = pack.get("questions", [])
-    if not isinstance(questions, list) or not questions:
-        return ["无缺失问题；仍建议人工复核边界、验证命令和受阻条件。"]
-    lines = [
-        "| 优先级 | 要素 | 推荐补法 | 示例 |",
-        "| --- | --- | --- | --- |",
-    ]
-    for question in questions:
-        if not isinstance(question, dict):
-            continue
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(str(question.get("priority", ""))),
-                    _markdown_cell(str(question.get("label", ""))),
-                    _markdown_cell(str(question.get("recommended_fill", ""))),
-                    _markdown_cell(str(question.get("example", ""))),
-                ]
-            )
-            + " |"
-        )
-    return lines
 
 
 def _markdown_score_table(scored_tasks: list[TaskScoreSummary]) -> list[str]:
