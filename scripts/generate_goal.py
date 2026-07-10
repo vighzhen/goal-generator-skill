@@ -154,7 +154,7 @@ FIELD_VALUE_TRIM_CHARS = " ;；,，\n\t"
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 NUMBER_PATTERN = re.compile(r"\d+")
 BRANCH_PATTERN = re.compile(r"(?:分支|branch)\s*[`'\"]?([A-Za-z0-9._/-]+)")
-COMMIT_RANGE_PATTERN = re.compile(r"\d+\s*[-~—]\s*\d+\s*个?\s*commit", re.IGNORECASE)
+COMMIT_RANGE_PATTERN = re.compile(r"(\d+)\s*[-~—]\s*(\d+)\s*(?:个)?\s*(?:commit)?", re.IGNORECASE)
 DEFAULT_BRANCH_SLUG = "codex-goal-task"
 DEFAULT_COMMIT_RANGE = "4-12 个 commit"
 TEXT_PREVIEW_LENGTH = 120
@@ -576,7 +576,7 @@ def _build_commit_section(goal: _GoalFields, branch_name: str) -> str:
 def _expected_commit_range(iteration: str) -> str:
     match = COMMIT_RANGE_PATTERN.search(iteration)
     if match:
-        return match.group(0)
+        return f"{match.group(1)}-{match.group(2)} 个 commit"
     return DEFAULT_COMMIT_RANGE
 
 
