@@ -1,0 +1,25 @@
+README.md
+  s_d243b2fbd7dab2::t_6357b730b1da14 241-243,323,395
+SKILL.md
+  s_d243b2fbd7dab2::t_ba1b4bd5571372 22,132
+scripts/batch_generate.py
+  s_d243b2fbd7dab2::t_fc4ad5f8c62f3d 24,121-132,159-183,195,197-198,227,1152-1230,1762,1772-1773
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b8469e8daf423d141da427c712448eaebc4a3d5d",
+  "prompts": {},
+  "sessions": {
+    "s_d243b2fbd7dab2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4d06-20b3-7700-8853-288481601c85",
+        "model": "unknown"
+      },
+      "human_author": "冯镇 <fengzhen.ayux@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
