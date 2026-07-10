@@ -496,6 +496,7 @@ def build_capabilities() -> dict[str, object]:
                 "--profile-summary",
                 "--score-summary",
                 "--score-report-md",
+                "--fail-below-score",
                 "--export-fields-json",
                 "--dedupe",
                 "--check",
@@ -605,6 +606,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量可执行度报告",
                 "scenario": "需要把每个任务的可执行度评分和下一步建议贴到 PR 或评审文档。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --score-report-md score_report.md",
+            },
+            {
+                "name": "批量可执行度门禁",
+                "scenario": "CI 或评审流程要求所有任务描述达到最低可执行度，否则阻止进入生成阶段。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --fail-below-score 65 --report-json score_gate.json",
             },
             {
                 "name": "批量字段草稿导出",

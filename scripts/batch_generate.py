@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
-    if args.score_summary or args.score_report_md:
+    if args.score_summary or args.score_report_md or args.fail_below_score is not None:
         return _run_score_summary_mode(tasks, args)
     if args.profile_summary:
         return _run_profile_summary_mode(tasks, args)
@@ -206,6 +206,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
+    parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
@@ -317,6 +318,11 @@ def _run_profile_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -
 
 
 def _run_score_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
+    try:
+        score_gate_threshold = _score_gate_threshold(args.fail_below_score)
+    except ValueError as error:
+        print(f"参数错误：{error}", file=sys.stderr)
+        return 1
     start_time = time.perf_counter()
     scored_tasks, skipped_tasks = _build_score_summaries(tasks, args.dedupe)
     summary_only = args.summary_only or args.check
@@ -324,14 +330,51 @@ def _run_score_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> 
         _print_score_summary(scored_tasks)
     stats = BatchStats(len(scored_tasks), len(skipped_tasks), time.perf_counter() - start_time)
     if args.report_json:
-        _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json))
+        _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json), score_gate_threshold)
     if args.score_report_md:
-        _write_score_report_markdown(scored_tasks, skipped_tasks, stats, Path(args.score_report_md))
+        _write_score_report_markdown(scored_tasks, skipped_tasks, stats, Path(args.score_report_md), score_gate_threshold)
     print(_format_summary(stats))
+    score_gate_failures = _score_gate_failures(scored_tasks, score_gate_threshold)
+    if score_gate_failures:
+        _print_score_gate_failures(score_gate_failures, score_gate_threshold)
     fail_on_skipped = args.fail_on_skipped or args.check
     if fail_on_skipped and stats.skipped_count:
         return 1
+    if score_gate_failures:
+        return 1
     return 0
+
+
+def _score_gate_threshold(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if value < 0 or value > 100:
+        raise ValueError("--fail-below-score 必须是 0 到 100 之间的整数")
+    return value
+
+
+def _score_gate_failures(scored_tasks: list[TaskScoreSummary], threshold: int | None) -> list[TaskScoreSummary]:
+    if threshold is None:
+        return []
+    return [scored_task for scored_task in scored_tasks if _score_value(scored_task.score) < threshold]
+
+
+def _score_value(score: dict[str, object]) -> int:
+    value = score.get("readiness_score", 0)
+    return value if isinstance(value, int) else 0
+
+
+def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int | None) -> None:
+    if threshold is None:
+        return
+    print(f"可执行度门禁失败：{len(failures)} 个任务低于 {threshold} 分。", file=sys.stderr)
+    for failure in failures:
+        score = failure.score
+        print(
+            f"- {failure.task.name}: {score.get('readiness_score', '')} "
+            f"({score.get('readiness_level', 'unknown')})",
+            file=sys.stderr,
+        )
 
 
 def _run_export_fields_json_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
@@ -1256,16 +1299,38 @@ def _write_score_summary_report(
     skipped_tasks: list[SkippedTask],
     stats: BatchStats,
     report_path: Path,
+    score_gate_threshold: int | None = None,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "success_count": stats.success_count,
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "score_gate": _score_gate_report(scored_tasks, score_gate_threshold),
         "tasks": [_task_score_summary_report(scored_task) for scored_task in scored_tasks],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _score_gate_report(scored_tasks: list[TaskScoreSummary], threshold: int | None) -> dict[str, object]:
+    if threshold is None:
+        return {"enabled": False}
+    failures = _score_gate_failures(scored_tasks, threshold)
+    return {
+        "enabled": True,
+        "threshold": threshold,
+        "failed_count": len(failures),
+        "failed_tasks": [
+            {
+                "name": failure.task.name,
+                "readiness_score": failure.score.get("readiness_score", 0),
+                "readiness_level": failure.score.get("readiness_level", "unknown"),
+                "missing": failure.score.get("missing", []),
+            }
+            for failure in failures
+        ],
+    }
 
 
 def _write_fields_export_report(
@@ -1297,6 +1362,7 @@ def _write_score_report_markdown(
     skipped_tasks: list[SkippedTask],
     stats: BatchStats,
     report_path: Path,
+    score_gate_threshold: int | None = None,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -1306,9 +1372,19 @@ def _write_score_report_markdown(
         f"- 跳过任务：{stats.skipped_count}",
         f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
         "",
-        "## 评分摘要",
-        "",
     ]
+    if score_gate_threshold is not None:
+        failures = _score_gate_failures(scored_tasks, score_gate_threshold)
+        lines.extend(
+            [
+                "## 阈值门禁",
+                "",
+                f"- 最低分：{score_gate_threshold}",
+                f"- 低于阈值：{len(failures)}",
+                "",
+            ]
+        )
+    lines.extend(["## 评分摘要", ""])
     lines.extend(_markdown_score_table(scored_tasks))
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
