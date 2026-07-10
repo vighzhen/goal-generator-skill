@@ -435,6 +435,7 @@ def build_capabilities() -> dict[str, object]:
                 "--sort-by",
                 "--limit",
                 "--list-tasks",
+                "--profile-summary",
                 "--dedupe",
                 "--check",
                 "--strict",
