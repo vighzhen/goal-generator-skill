@@ -122,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         require_task_path = _require_task_path_from_args(args)
         require_existing_task_path = _require_existing_task_path_from_args(args)
         allowed_path_roots = _allowed_path_roots_from_args(args)
+        require_unique_task_names = _require_unique_task_names_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -212,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         require_task_path,
         require_existing_task_path,
         allowed_path_roots,
+        require_unique_task_names,
     )
     output_lint_report = None
     if args.lint_output:
@@ -265,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     if require_existing_task_path and (_has_required_path_skips(skipped_tasks) or _has_missing_existing_path_skips(skipped_tasks)):
         return 1
     if allowed_path_roots and (_has_required_path_skips(skipped_tasks) or _has_allowed_path_root_skips(skipped_tasks)):
+        return 1
+    if require_unique_task_names and _has_duplicate_name_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -333,6 +337,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allowed-path-roots",
         help="真实生成、dry-run、check 或 lint-output 时要求任务路径位于指定根目录内，多个根目录用逗号分隔。",
+    )
+    parser.add_argument(
+        "--require-unique-task-names",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求每个任务 name 唯一。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -494,6 +503,25 @@ def _allowed_path_roots_from_args(args: argparse.Namespace) -> list[Path]:
     if not roots:
         raise ValueError("--allowed-path-roots 必须包含至少一个路径根目录")
     return roots
+
+
+def _require_unique_task_names_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_unique_task_names:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-unique-task-names 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
 
 
 def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
@@ -2676,15 +2704,25 @@ def _process_tasks(
     require_task_path: bool = False,
     require_existing_task_path: bool = False,
     allowed_path_roots: list[Path] | None = None,
+    require_unique_task_names: bool = False,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
     used_slugs: set[str] = set()
     seen_task_keys: set[str] = set()
+    duplicate_names = (
+        set(_duplicate_task_names(_effective_tasks_for_name_gate(tasks, dedupe))) if require_unique_task_names else set()
+    )
     for index, task in enumerate(tasks, start=1):
         if dedupe and _is_duplicate_task(task, seen_task_keys):
             reason = "重复任务：任务名和描述已出现过"
             skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        if task.name in duplicate_names:
+            reason = _duplicate_task_name_error(task.name)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
             continue
         try:
             output = _process_one_task(
@@ -2719,6 +2757,28 @@ def _is_duplicate_task(task: TaskSpec, seen_task_keys: set[str]) -> bool:
     return False
 
 
+def _effective_tasks_for_name_gate(tasks: list[TaskSpec], dedupe: bool) -> list[TaskSpec]:
+    if not dedupe:
+        return tasks
+    effective_tasks: list[TaskSpec] = []
+    seen_task_keys: set[str] = set()
+    for task in tasks:
+        task_key = _dedupe_key(task)
+        if task_key in seen_task_keys:
+            continue
+        effective_tasks.append(task)
+        seen_task_keys.add(task_key)
+    return effective_tasks
+
+
+def _duplicate_task_name_error(task_name: str) -> str:
+    return f"重复任务名：{task_name}；--require-unique-task-names 要求每个任务 name 唯一"
+
+
+def _has_duplicate_name_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("重复任务名" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -2732,6 +2792,8 @@ def _skip_suggestion(reason: str) -> str:
         return "修正 path、inspect_path 或 target_path，确保其相对当前工作目录存在且可访问。"
     if "任务路径超出允许根目录" in reason:
         return "把任务 path 调整到允许根目录内，或确认范围后扩展 --allowed-path-roots。"
+    if "重复任务名" in reason:
+        return "为同名任务改成唯一 name；如果确实是重复任务，可先使用 --dedupe 移除完全重复项。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
