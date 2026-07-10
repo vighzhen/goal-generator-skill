@@ -126,5 +126,6 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量 Bug 修复
 - 代码迁移/升级
 - 文档生成
+- 批量任务指令生成
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。
