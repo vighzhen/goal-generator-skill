@@ -132,6 +132,7 @@ VERIFICATION_ACTION_KEYWORDS: tuple[str, ...] = (
 )
 CONSTRAINT_KEYWORDS: tuple[str, ...] = (
     "不修改",
+    "不改",
     "不改变",
     "不引入",
     "不做",
@@ -399,6 +400,14 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "blocked": ("blocked", "受阻停止条件", "阻塞", "停下", "跳过"),
 }
 FIELD_VALUE_TRIM_CHARS = " ;；,，。.\n\t"
+CONTEXT_CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
+CONTEXT_FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
+    "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试", "pytest", "unittest", "run", "verify", "test"),
+    "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容", "do not", "don't", "keep", "without"),
+    "boundaries": ("边界", "范围", "仅", "只", "目录", "排除", "src/", "tests/", "only", "scope", "within", "exclude"),
+    "iteration": ("迭代", "每个", "每次", "逐个", "commit", "提交", "预期", "each", "per", "after validation"),
+    "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少", "ask me", "stop", "skip", "blocked"),
+}
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 NUMBER_PATTERN = re.compile(r"\d+")
 BRANCH_PATTERN = re.compile(r"(?:分支|branch)\s*[`'\"]?([A-Za-z0-9._/-]+)")
@@ -561,6 +570,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.output_file,
             )
             return 0
+        if args.merge_context:
+            _emit_output(
+                json.dumps(merge_task_context(args.merge_context, args.supplement or []), ensure_ascii=False, indent=2),
+                args.output_file,
+            )
+            return 0
         if args.explain_missing:
             _emit_output(
                 json.dumps(explain_missing_elements(args.explain_missing), ensure_ascii=False, indent=2),
@@ -601,6 +616,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
     parser.add_argument("--inspect-path", help="扫描本地文件或目录，输出代码上下文、边界和验证命令建议 JSON。")
     parser.add_argument("--path-task", help="配合 --inspect-path 提供用户目标描述，用于生成更贴近场景的建议字段。")
+    parser.add_argument("--merge-context", help="合并原始任务描述和补充回答，输出可生成 /goal 的字段草稿 JSON。")
+    parser.add_argument("--supplement", action="append", help="配合 --merge-context 提供一条补充回答，可重复传入。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
@@ -906,6 +923,106 @@ def check_redaction(description: str) -> dict[str, object]:
         "redacted_preview": _normalize_text(_redact_sensitive_text(description, findings))[:TEXT_PREVIEW_LENGTH],
         "recommended_action": _redaction_recommended_action(risk_level, findings),
     }
+
+
+def merge_task_context(original_description: str, supplements: list[str]) -> dict[str, object]:
+    """合并原始需求和补充回答，产出可进入 --generate 的字段草稿。"""
+    if not original_description.strip():
+        raise ValueError("--merge-context 不能为空，请提供原始任务描述")
+    clean_supplements = [_normalize_text(supplement) for supplement in supplements if supplement.strip()]
+    combined_text = _combined_context_text(original_description, clean_supplements)
+    analysis = analyze_description(combined_text)
+    explicit_fields = _extract_labeled_fields(combined_text)
+    fields = dict(explicit_fields)
+    field_sources = {key: "explicit_label" for key in explicit_fields}
+    _merge_context_present_fields(fields, field_sources, combined_text, analysis)
+    missing = _missing_field_keys(fields)
+    profile = build_task_profile(combined_text)
+    recommended_fields = _recommended_field_mapping(profile)
+    validation = validate_fields_json_data({"fields": fields}, "merge_context")
+    ready_to_generate = not missing and bool(validation["valid"])
+    return {
+        "original_description": _normalize_text(original_description),
+        "supplements": clean_supplements,
+        "combined_preview": _normalize_text(combined_text)[:TEXT_PREVIEW_LENGTH],
+        "task_type": profile.get("task_type", {}),
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": profile.get("risk_score", 0),
+        "ready_to_generate": ready_to_generate,
+        "missing": missing,
+        "fields": {key: fields[key] for key in ELEMENT_ORDER if key in fields},
+        "field_sources": _merge_field_sources(field_sources),
+        "recommended_for_missing": {
+            key: str(recommended_fields.get(key, DEFAULT_PROFILE_TEMPLATE[key]))
+            for key in missing
+        },
+        "validation": validation,
+        "next_prompt": "" if ready_to_generate else format_question_prompt(combined_text),
+        "next_command": _merge_next_command(ready_to_generate, missing),
+    }
+
+
+def _combined_context_text(original_description: str, supplements: list[str]) -> str:
+    parts = [_normalize_text(original_description), *supplements]
+    return "\n".join(part for part in parts if part)
+
+
+def _merge_context_present_fields(
+    fields: dict[str, str],
+    field_sources: dict[str, str],
+    combined_text: str,
+    analysis: AnalysisResult,
+) -> None:
+    for key in analysis["present"]:
+        if fields.get(key):
+            continue
+        fields[key] = _context_fallback_field_value(key, combined_text)
+        field_sources[key] = "inferred_from_context"
+
+
+def _context_fallback_field_value(key: str, combined_text: str) -> str:
+    clauses = _context_clauses(combined_text)
+    if key == "outcome":
+        return _outcome_context_clause(clauses) or _normalize_text(combined_text)
+    return _matching_context_clause(clauses, CONTEXT_FALLBACK_HINTS.get(key, ())) or _normalize_text(combined_text)
+
+
+def _context_clauses(text: str) -> list[str]:
+    return [clause.strip() for clause in CONTEXT_CLAUSE_SPLIT_PATTERN.split(text) if clause.strip()]
+
+
+def _outcome_context_clause(clauses: list[str]) -> str:
+    for clause in clauses:
+        lowered_clause = clause.lower()
+        if _has_outcome(lowered_clause):
+            return _strip_context_label(clause)
+    return _strip_context_label(clauses[0]) if clauses else ""
+
+
+def _matching_context_clause(clauses: list[str], hints: tuple[str, ...]) -> str:
+    for clause in clauses:
+        lowered_clause = clause.lower()
+        if any(hint.lower() in lowered_clause for hint in hints):
+            return _strip_context_label(clause)
+    return ""
+
+
+def _strip_context_label(clause: str) -> str:
+    if "：" in clause:
+        return clause.split("：", 1)[1].strip()
+    if ":" in clause:
+        return clause.split(":", 1)[1].strip()
+    return clause
+
+
+def _merge_field_sources(field_sources: dict[str, str]) -> dict[str, str]:
+    return {key: field_sources.get(key, "missing") for key in ELEMENT_ORDER}
+
+
+def _merge_next_command(ready_to_generate: bool, missing: list[str]) -> str:
+    if ready_to_generate:
+        return "保存 fields 为 JSON 后执行：python3 scripts/generate_goal.py --generate --from-json <fields.json>"
+    return f"先补齐缺失要素：{_labels_for_keys(missing)}，再重新运行 --merge-context。"
 
 
 def inspect_path_context(path_value: str, task_description: str = "") -> dict[str, object]:

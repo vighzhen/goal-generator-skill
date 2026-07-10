@@ -97,6 +97,19 @@ python3 scripts/generate_goal.py --template bugfix
 python3 scripts/generate_goal.py --questions "我要让 Codex 帮我给项目加单元测试"
 ```
 
+### 合并原始需求和补充回答
+
+当用户先给出模糊需求、再按追问补充路径、验证命令、约束和受阻条件时，可用 `--merge-context` 加可重复的 `--supplement` 把多轮上下文合并成 6 要素字段草稿：
+
+```bash
+python3 scripts/generate_goal.py \
+  --merge-context "我要让 Codex 帮我给项目加单元测试" \
+  --supplement "只测 src/services，用 pytest tests/services -q，不改业务逻辑" \
+  --supplement "每个模块一个 commit，无法判断断言时停下问我"
+```
+
+输出包含 `fields`、`field_sources`、`missing`、`recommended_for_missing`、`ready_to_generate` 和 `next_command`。当 `ready_to_generate` 为 `true` 时，可保存 `fields` 为 JSON，再运行 `python3 scripts/generate_goal.py --generate --from-json <fields.json>`。
+
 ### 写入文件
 
 单任务命令可追加 `--output-file`，把分析、画像、追问文案或完整 `/goal` 指令写入文件，避免长文本复制丢失：
@@ -284,6 +297,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 已有 `/goal` 文件结构校验
 - 一键生成可复制的缺失要素追问文案
+- 原始需求与补充回答合并为 6 要素字段草稿
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
