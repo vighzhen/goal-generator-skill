@@ -366,6 +366,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.score:
             _emit_output(json.dumps(score_description(args.score), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.suggest_fields:
+            _emit_output(json.dumps(suggest_goal_fields(args.suggest_fields), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.explain_missing:
             _emit_output(
                 json.dumps(explain_missing_elements(args.explain_missing), ensure_ascii=False, indent=2),
@@ -402,6 +405,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
+    parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
@@ -449,6 +453,7 @@ def build_capabilities() -> dict[str, object]:
                 "--questions",
                 "--profile",
                 "--score",
+                "--suggest-fields",
                 "--explain-missing",
                 "--list-templates",
                 "--template",
@@ -517,6 +522,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "评估可执行度",
                 "scenario": "快速判断一句需求距离可直接生成高质量 /goal 还差多少。",
                 "command": "python3 scripts/generate_goal.py --score '给项目加单元测试'",
+            },
+            {
+                "name": "生成字段建议",
+                "scenario": "把一句话需求变成可编辑、可机器读取的 6 要素字段草稿。",
+                "command": "python3 scripts/generate_goal.py --suggest-fields '给项目加单元测试'",
             },
             {
                 "name": "解释缺失要素",
@@ -767,6 +777,37 @@ def _readiness_recommended_command(level: str) -> str:
     if level == "ready":
         return "python3 scripts/generate_goal.py --generate ..."
     return "python3 scripts/generate_goal.py --explain-missing '<任务描述>'"
+
+
+def suggest_goal_fields(description: str) -> dict[str, object]:
+    """从任务描述生成可编辑、可机器读取的 6 要素字段建议。"""
+    if not description.strip():
+        raise ValueError("--suggest-fields 不能为空，请提供任务描述")
+    field_values = _extract_labeled_fields(description)
+    analysis = analyze_description(description)
+    _merge_present_fallbacks(field_values, description, analysis)
+    profile = build_task_profile(description)
+    recommended_fields = profile.get("recommended_fields", {})
+    recommendations = recommended_fields if isinstance(recommended_fields, dict) else {}
+    fields: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for key in ELEMENT_ORDER:
+        value = field_values.get(key)
+        if value:
+            fields[key] = value
+            sources[key] = "input_or_detected"
+            continue
+        fields[key] = str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]))
+        sources[key] = "recommended_direction"
+    return {
+        "fields": fields,
+        "sources": sources,
+        "missing": analysis["missing"],
+        "present": analysis["present"],
+        "task_type": profile.get("task_type", {}),
+        "score": score_description(description),
+        "note": "sources 为 recommended_direction 的字段是补全方向，不是用户确认后的最终事实；执行 --generate 前请按真实项目情况编辑。",
+    }
 
 
 def explain_missing_elements(description: str) -> dict[str, object]:
