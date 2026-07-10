@@ -847,7 +847,7 @@ def _collect_inspection_files(root: Path) -> tuple[list[Path], bool]:
     files: list[Path] = []
     truncated = False
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = [dirname for dirname in dirnames if dirname not in INSPECT_SKIP_DIRS]
+        dirnames[:] = sorted(dirname for dirname in dirnames if dirname not in INSPECT_SKIP_DIRS)
         for filename in sorted(filenames):
             file_path = Path(current_root) / filename
             if not file_path.is_file():
