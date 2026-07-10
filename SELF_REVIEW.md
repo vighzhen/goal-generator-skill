@@ -1003,6 +1003,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "forbid-default-fields"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、描述启发式提供 verification 的任务 `--dry-run --forbid-default-fields "Verification Surface"` 通过并断言 verification 未默认兜底、示例清单 `--dry-run --forbid-default-fields verification,boundaries` 返回失败退出码并断言仅跳过 `登录接口Bug修复`、真实生成、`--check` 与 `--lint-output` 组合均返回失败退出码并保留“禁止默认兜底要素”原因、`--lint-fields` 无效组合与未知字段参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 30 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 30 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3045 行 sha256 efaeb2c004973dbb、SKILL.md 144 行 sha256 156fc3ff18aac81f、README.md 486 行 sha256 668bec155ad0b858、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 29 轮禁用默认兜底门禁、路径画像/回填能力和批量生成前准备流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务路径必填门禁 | 批量清单已支持 `path`/`inspect_path`/`target_path` 并可用 `--inspect-paths`、`--enrich-from-paths` 获取代码上下文，但真实生成、dry-run 和 lint-output 默认不要求任务绑定代码路径；团队希望所有批量任务都可追溯到明确文件或目录时，只能人工检查或写外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--require-task-path`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；未提供 `path`/`inspect_path`/`target_path` 的任务会跳过并返回失败退出码，报告保留跳过原因和建议。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务路径必填门禁 | `--inspect-paths` | `--inspect-paths` 在分析模式中扫描已有路径并报告错误；新功能在生成/dry-run/check/lint-output 前要求路径字段存在，解决批量清单准入策略问题。 | 通过 |
+| 批量任务路径必填门禁 | `--enrich-from-paths` | `--enrich-from-paths` 用已有路径回填建议字段；新功能不生成建议字段，而是阻断没有路径锚点的任务，拦截时机和目标不同。 | 通过 |
+| 批量任务路径必填门禁 | `--strict` / `--max-defaulted-fields` / `--forbid-default-fields` | 这些门禁关注 6 要素缺失、默认值数量或字段默认化；新功能关注任务是否绑定代码路径，是上下文可追溯性门禁。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务路径必填门禁 | 团队批量生成前要求每个任务都能映射到一个本地文件或目录，便于后续路径画像、边界复核和执行者定位。 | 人工逐条检查 JSON/CSV 的 path 字段，或先运行 `--inspect-paths` 再解析路径错误，真实生成时仍可能混入无路径任务。 | 一条命令在主生成流程中强制路径字段存在，无路径任务直接跳过并失败退出，报告给出可修复建议。 | 新增上下文锚点准入门禁，不是路径扫描报告或 6 要素质量检查的展示变体。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1011,7 +1041,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 29 轮已完成，准备进入第 30 轮；累计修复 4 个已完成问题，新增 29 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 30 轮审查清单已建立，正在实现批量任务路径必填门禁；累计修复 4 个已完成问题，新增 29 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
