@@ -138,6 +138,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --merge-context ... --supplement ...`、`--validate-fields-json`、`--generate --from-json` 和完整 `--generate` 端到端验证。
 
+## 第 5 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 5 轮要求重新通读全部 7 个范围内文件及第 4 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮继续强化生成前质量门禁。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 6 要素语义质量检查 | 用户可能已经有完整 6 要素 JSON，`--validate-fields-json` 会通过，但字段仍然很泛，例如“跑测试”“处理相关文件”“有问题就问”；结构有效不代表 `/goal` 高质量。当前缺少生成前语义质量门禁。 | 在 `scripts/generate_goal.py` 新增 `--lint-fields-json <path>`，在完整性校验之外检查每个要素的可执行性、具体性、验证命令、边界范围、commit 节奏和受阻条件，输出评分、问题、建议与退出码；同步更新 README 和 SKILL。 | 待实现 | 待回填 |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 6 要素语义质量检查 | `--validate-fields-json` | `--validate-fields-json` 只验证字段存在、非空、无未知字段且可渲染；新功能检查字段内容是否具体、可执行、能防偷懒，属于语义质量门禁。 | 通过 |
+| 6 要素语义质量检查 | `--analyze` / `--profile` | `--analyze` 面向自然语言需求缺口；新功能面向已经整理出的字段 JSON，发现“形式完整但质量差”的问题。 | 通过 |
+| 6 要素语义质量检查 | `--validate-goal-file` | `--validate-goal-file` 检查 `/goal` 文本结构；新功能在生成前检查 6 要素字段质量，输入和拦截时机不同。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 6 要素语义质量检查 | 自动化或人工整理出字段 JSON 后，需要在生成 `/goal` 前判断字段是否足够具体，避免把“完整但空泛”的指令交给执行者。 | 只能依赖人工审稿，或让结构校验通过后直接生成，容易产出难执行、难验证的 `/goal`。 | 一条命令给出字段质量分数、问题定位和修复建议，生成前即可改进字段内容。 | 不是结构校验或报告展示，而是新增语义质量分析能力，覆盖结构有效但质量不足的新风险。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 5 轮审查清单，计划实现 1 个字段语义质量门禁功能。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -146,7 +180,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 4 轮；累计修复 2 个问题，新增 4 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 5 轮；累计修复 2 个问题，新增 4 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
