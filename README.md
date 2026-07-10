@@ -106,6 +106,16 @@ python3 scripts/generate_goal.py --generate \
 python3 scripts/generate_goal.py --generate --from-json goal_fields.json
 ```
 
+### 校验已有 /goal 文件
+
+如果 `/goal` 指令经过手工编辑、复制或批量拼接，可以用 `--validate-goal-file` 检查分隔线、5 段结构和 6 要素提示是否完整：
+
+```bash
+python3 scripts/generate_goal.py --validate-goal-file goal.txt
+```
+
+命令会输出 JSON 校验报告；结构完整时退出码为 0，否则退出码为 1，便于在脚本或 CI 中拦截坏指令。
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -257,6 +267,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 任务类型画像与 6 要素模板推荐
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 机器可读能力清单输出
+- 已有 `/goal` 文件结构校验
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`

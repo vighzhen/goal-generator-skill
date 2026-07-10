@@ -232,6 +232,20 @@ DEFAULT_COMMIT_RANGE = "4-12 个 commit"
 TEXT_PREVIEW_LENGTH = 120
 SEPARATOR_START = "==================== /goal 指令开始 ===================="
 SEPARATOR_END = "==================== /goal 指令结束 ===================="
+GOAL_SECTION_LABELS: dict[str, str] = {
+    "mandatory": "强制要求：",
+    "commit": "提交规则：",
+    "output": "输出文件格式：",
+    "detail": "详细规则：",
+}
+GOAL_ELEMENT_CUES: dict[str, str] = {
+    "outcome": "完成以下目标：",
+    "verification": "验证方式为：",
+    "constraints": "约束为：",
+    "boundaries": "任务边界为：",
+    "iteration": "迭代策略为：",
+    "blocked": "受阻停止条件为：",
+}
 
 
 class Question(TypedDict):
@@ -336,6 +350,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.analyze:
             _emit_output(json.dumps(analyze_description(args.analyze), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.validate_goal_file:
+            validation = validate_goal_file(args.validate_goal_file)
+            _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if validation["valid"] else 1
         if args.generate:
             _emit_output(render_goal_text(_goal_from_args(args)), args.output_file)
             return 0
@@ -357,6 +375,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
+    parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
@@ -397,6 +416,7 @@ def build_capabilities() -> dict[str, object]:
                 "--list-templates",
                 "--template",
                 "--capabilities",
+                "--validate-goal-file",
                 "--generate",
                 "--interactive",
                 "--from-json",
@@ -445,6 +465,71 @@ def get_task_template(template_id: str) -> dict[str, object]:
         return {"id": "generic", "label": "通用编码任务", "recommended_fields": DEFAULT_PROFILE_TEMPLATE}
     known_ids = "、".join(template["id"] for template in list_task_templates())
     raise ValueError(f"未知模板：{template_id}，可选值：{known_ids}")
+
+
+def validate_goal_file(goal_file: str) -> dict[str, object]:
+    """校验已有 /goal 指令文件的结构完整度。"""
+    goal_path = Path(goal_file)
+    return validate_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def validate_goal_text(goal_text: str, source: str = "") -> dict[str, object]:
+    """校验 /goal 指令文本是否保留分隔线、5 段结构和 6 要素提示。"""
+    separator_checks = _goal_separator_checks(goal_text)
+    section_checks = _goal_section_checks(goal_text)
+    element_checks = _goal_element_checks(goal_text)
+    missing = _missing_goal_validation_items(separator_checks, section_checks, element_checks)
+    return {
+        "valid": not missing,
+        "source": source,
+        "checks": {
+            "separators": separator_checks,
+            "sections": section_checks,
+            "element_cues": element_checks,
+        },
+        "missing": missing,
+    }
+
+
+def _goal_separator_checks(goal_text: str) -> dict[str, bool]:
+    start_index = goal_text.find(SEPARATOR_START)
+    end_index = goal_text.find(SEPARATOR_END)
+    return {
+        "start_separator": start_index != -1,
+        "end_separator": end_index != -1,
+        "ordered": start_index != -1 and end_index != -1 and start_index < end_index,
+    }
+
+
+def _goal_section_checks(goal_text: str) -> dict[str, bool]:
+    return {
+        "overview": _has_goal_command_line(goal_text),
+        **{key: label in goal_text for key, label in GOAL_SECTION_LABELS.items()},
+    }
+
+
+def _has_goal_command_line(goal_text: str) -> bool:
+    return any(line.strip().startswith("/goal ") for line in goal_text.splitlines())
+
+
+def _goal_element_checks(goal_text: str) -> dict[str, bool]:
+    return {key: cue in goal_text for key, cue in GOAL_ELEMENT_CUES.items()}
+
+
+def _missing_goal_validation_items(
+    separator_checks: dict[str, bool],
+    section_checks: dict[str, bool],
+    element_checks: dict[str, bool],
+) -> list[str]:
+    missing: list[str] = []
+    missing.extend(_missing_named_checks(separator_checks, "separator"))
+    missing.extend(_missing_named_checks(section_checks, "section"))
+    missing.extend(_missing_named_checks(element_checks, "element_cue"))
+    return missing
+
+
+def _missing_named_checks(checks: dict[str, bool], group: str) -> list[str]:
+    return [f"{group}.{name}" for name, passed in checks.items() if not passed]
 
 
 def build_task_profile(description: str) -> dict[str, object]:
