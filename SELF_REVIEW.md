@@ -35,6 +35,41 @@
 
 修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --inspect-path scripts --path-task '优化 goal 生成器的输入分析能力'`、完整 `--generate` 端到端验证。
 
+## 第 2 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/generate_goal.py | 第 1 轮新增的 `--inspect-path` 使用 `os.walk` 时只过滤目录但未排序目录名，跨平台或文件系统顺序不同会导致 `sample_files`、验证命令样例和 JSON 输出顺序不稳定，不利于审计与回归比对。 | 待修复 | 待回填 |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 2 轮要求重新通读全部 7 个范围内文件及第 1 轮新增功能；除上述稳定性问题外，暂未发现新的 P0/P1。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务依赖计划 | 团队批量任务常存在“先改基础模块，再补测试/文档/迁移”的依赖关系；当前批量脚本只能按输入/名称排序，无法表达依赖、发现缺失依赖或循环依赖，用户只能手工维护执行顺序。 | 在 `scripts/batch_generate.py` 新增可选 `depends_on`/`dependencies` 字段解析（JSON 数组或字符串，CSV 分隔字符串）和 `--plan-dependencies` 命令，输出按依赖分批的执行计划、未知依赖、重复任务名和循环依赖问题；支持 `--report-json`、`--filter`、`--limit`、`--dedupe` 与摘要输出。 | 待实现 | 待回填 |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务依赖计划 | `--sort-by input/name` | `--sort-by` 只改变平铺输出顺序；新功能读取任务间依赖约束，生成执行波次并检测未知/循环依赖，属于任务关系分析而不是排序展示变体。 | 通过 |
+| 批量任务依赖计划 | `--list-tasks` | `--list-tasks` 预览筛选后的任务名称；新功能回答“哪些任务必须先做、哪些被阻塞、依赖图是否有效”，解决跨任务编排问题。 | 通过 |
+| 批量任务依赖计划 | `--check` / `--strict` | `--check` 关注单个任务 6 要素完整度；新功能关注任务之间的执行约束和图结构有效性，验证维度不同。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务依赖计划 | 多个 `/goal` 任务需要按依赖分批执行，例如先完成接口改造，再补测试，再更新文档；还需要在交付前发现依赖写错或循环。 | 手动阅读 JSON/CSV、手工排序、靠人工记忆检查依赖名是否存在，容易漏掉前置任务或把循环任务交给执行者。 | 一条命令给出执行波次、依赖问题和机器可读报告，批量生成前即可发现编排风险。 | 现有功能分析单任务或平铺批量清单；该功能显式处理任务间关系，是新场景覆盖和分析能力增强。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 2 轮审查清单，计划先修复 `--inspect-path` 输出顺序稳定性，再实现 1 个批量依赖分析能力。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -43,7 +78,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 1 轮；累计修复 1 个问题，新增 1 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 2 轮；累计修复 1 个问题，新增 1 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
