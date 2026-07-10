@@ -69,6 +69,15 @@ class TaskOutput:
     task_name: str
     content: str
     file_slug: str
+    present_keys: list[str]
+    missing_before_defaults: list[str]
+    defaulted_keys: list[str]
+
+
+@dataclass(frozen=True)
+class SkippedTask:
+    task_name: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -95,10 +104,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    outputs, skipped_count = _process_tasks(tasks, args.dry_run, args.strict, args.verbose)
+    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.verbose)
     _write_outputs(outputs, args.output_dir, args.output_file)
     elapsed_seconds = time.perf_counter() - start_time
-    stats = BatchStats(len(outputs), skipped_count, elapsed_seconds)
+    stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
+    if args.report_json:
+        _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json))
     print(_format_summary(stats))
     return 0
 
@@ -110,6 +121,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
+    parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
@@ -275,18 +287,18 @@ def _process_tasks(
     dry_run: bool,
     strict: bool,
     verbose: bool,
-) -> tuple[list[TaskOutput], int]:
+) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
-    skipped_count = 0
+    skipped_tasks: list[SkippedTask] = []
     used_slugs: set[str] = set()
     for index, task in enumerate(tasks, start=1):
         try:
             output = _process_one_task(task, index, dry_run, strict, used_slugs, verbose)
             outputs.append(output)
         except (ValueError, OSError) as error:
-            skipped_count += 1
+            skipped_tasks.append(SkippedTask(task.name, str(error)))
             print(f"跳过任务 {task.name}：{error}", file=sys.stderr)
-    return outputs, skipped_count
+    return outputs, skipped_tasks
 
 
 def _process_one_task(
@@ -306,7 +318,14 @@ def _process_one_task(
     slug = _unique_slug(task.name, index, used_slugs)
     if verbose:
         _print_verbose(prepared, slug)
-    return TaskOutput(task_name=task.name, content=content, file_slug=slug)
+    return TaskOutput(
+        task_name=task.name,
+        content=content,
+        file_slug=slug,
+        present_keys=prepared.present_keys,
+        missing_before_defaults=prepared.missing_before_defaults,
+        defaulted_keys=prepared.defaulted_keys,
+    )
 
 
 def _prepare_task(task: TaskSpec, strict: bool = False) -> PreparedTask:
@@ -439,6 +458,37 @@ def _write_output_dir(outputs: list[TaskOutput], output_dir: Path) -> None:
 def _write_output_file(outputs: list[TaskOutput], output_file: Path) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(f"{TASK_SEPARATOR.join(output.content for output in outputs)}\n", encoding="utf-8")
+
+
+def _write_report_json(
+    outputs: list[TaskOutput],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "tasks": [_task_report(output) for output in outputs],
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _task_report(output: TaskOutput) -> dict[str, object]:
+    return {
+        "name": output.task_name,
+        "file_slug": output.file_slug,
+        "present": output.present_keys,
+        "missing_before_defaults": output.missing_before_defaults,
+        "defaulted": output.defaulted_keys,
+    }
+
+
+def _skipped_report(skipped: SkippedTask) -> dict[str, str]:
+    return {"name": skipped.task_name, "reason": skipped.reason}
 
 
 def _unique_slug(name: str, index: int, used_slugs: set[str]) -> str:

@@ -124,6 +124,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.md --dry-run
 # 严格模式：缺失 6 要素的任务会跳过，不使用默认填充，适合 CI 或团队交付前检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --strict
 
+# 输出结构化 JSON 报告，便于 CI、IDE 或脚本读取每个任务的缺失项和跳过原因
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --report-json batch_report.json
+
 # 每个任务生成一个独立 .txt 文件，输出目录不存在时会自动创建
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/
 
@@ -131,7 +134,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项和跳过原因，方便自动化集成。
 
 ## 6 个必要要素
 
