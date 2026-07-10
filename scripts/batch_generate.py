@@ -104,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
         tasks = _filter_tasks(tasks, args.filter)
         tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
+        if args.dependency_order:
+            tasks = _apply_dependency_order(tasks, args.dedupe)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
@@ -157,6 +159,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--plan-dependencies", action="store_true", help="根据 depends_on/dependencies 字段输出批量任务依赖执行计划。")
+    parser.add_argument("--dependency-order", action="store_true", help="按 depends_on/dependencies 拓扑顺序处理批量任务。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -211,6 +214,46 @@ def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
     if limit < 1:
         raise ValueError("--limit 必须是大于 0 的整数")
     return tasks[:limit]
+
+
+def _apply_dependency_order(tasks: list[TaskSpec], dedupe: bool) -> list[TaskSpec]:
+    ordered_tasks, _skipped_tasks = _dedupe_preview_tasks(tasks, dedupe)
+    plan = _build_dependency_plan(ordered_tasks)
+    if not plan.get("valid", False):
+        raise ValueError(f"--dependency-order 依赖无效：{_dependency_order_error(plan)}")
+    task_by_name = {task.name: task for task in _unique_tasks_by_name(ordered_tasks)}
+    ordered_names = _dependency_ordered_names(plan)
+    return [task_by_name[name] for name in ordered_names if name in task_by_name]
+
+
+def _dependency_ordered_names(plan: dict[str, object]) -> list[str]:
+    ordered_names: list[str] = []
+    waves = plan.get("waves", [])
+    if not isinstance(waves, list):
+        return ordered_names
+    for wave in waves:
+        if not isinstance(wave, dict):
+            continue
+        tasks = wave.get("tasks", [])
+        if not isinstance(tasks, list):
+            continue
+        for task in tasks:
+            if isinstance(task, dict) and task.get("name"):
+                ordered_names.append(str(task["name"]))
+    return ordered_names
+
+
+def _dependency_order_error(plan: dict[str, object]) -> str:
+    issues = plan.get("issues", [])
+    if not isinstance(issues, list) or not issues:
+        return "未知依赖问题"
+    messages: list[str] = []
+    for issue in issues[:5]:
+        if isinstance(issue, dict):
+            messages.append(f"{issue.get('name', '未知任务')}：{issue.get('reason', '')}")
+    if len(issues) > 5:
+        messages.append(f"其余 {len(issues) - 5} 个问题可用 --plan-dependencies 查看")
+    return "；".join(messages) if messages else "未知依赖问题"
 
 
 def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
