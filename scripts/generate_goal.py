@@ -540,7 +540,6 @@ def build_capabilities() -> dict[str, object]:
                 "--sort-by",
                 "--limit",
                 "--list-tasks",
-                "--profile-summary",
                 "--dedupe",
                 "--check",
                 "--strict",
@@ -549,7 +548,6 @@ def build_capabilities() -> dict[str, object]:
                 "--output-dir",
                 "--output-file",
                 "--report-json",
-                "--include-profile",
                 "--verbose",
             ],
         },
@@ -646,11 +644,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "预览任务范围",
                 "scenario": "配置 filter/sort/limit 后先确认将处理哪些任务。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --list-tasks --filter '测试|Bug' --sort-by name",
-            },
-            {
-                "name": "批量风险摘要",
-                "scenario": "团队评审时快速查看任务类型、风险等级和缺失要素。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-summary --sort-by name",
             },
         ],
     }
