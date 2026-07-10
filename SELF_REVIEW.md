@@ -628,6 +628,37 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（按授权提权运行以写入 Python 缓存）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --help | grep -n "lint-goal-bundle"`、用 `scripts/batch_generate.py --output-file --lint-output` 生成高质量合集并由 `--lint-goal-bundle --output-file` 通过、断言 `goal_count`/`task_name`/行号、混合合集失败退出码与失败块定位断言、分隔线不配对合集失败退出码与 `bundle_issues` 断言、无块文件失败退出码断言、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
+
+## 第 19 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/generate_goal.py | 第 18 轮新增 `--lint-goal-bundle` 后，`--lint-goal-dir` / `--lint-goal-tree` 仍把每个 `.txt` 当作单个 `/goal` 文本调用 `lint_goal_text`；如果目录中某个 `.txt` 是批量 `--output-file` 产生的合集文件，目录级门禁可能只围绕整体或首个概述判断，漏检后续低质块。 | 待修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 目录/目录树合集感知质量门禁 | 用户把批量合集文件和单个 `/goal` 文件混放在交付目录中时，必须一条目录级命令同时检查普通文件与合集文件；否则还要先人工识别哪些文件需要 `--lint-goal-bundle`。 | 让 `_goal_dir_file_report` 读取 `.txt` 后自动识别多个标准分隔块或分隔线不配对场景；普通单目标文件继续走 `lint_goal_text`，合集文件改走块级检查并在目录/树报告中保留 `bundle` 摘要、失败块数、块级问题和原有聚合退出码。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 目录/目录树合集感知质量门禁 | `scripts/generate_goal.py --lint-goal-bundle` | `--lint-goal-bundle` 需要用户已知道某个文件是合集并单独传入；新功能让目录/树扫描自动识别并逐段检查合集文件，覆盖混合交付目录。 | 通过 |
+| 目录/目录树合集感知质量门禁 | `--lint-goal-dir` / `--lint-goal-tree` | 现有目录命令以文件为单位，不拆合集；新功能增强同一目录命令的检查深度，避免目录级交付门禁假通过。 | 通过 |
+| 目录/目录树合集感知质量门禁 | `scripts/batch_generate.py --lint-output` | `--lint-output` 检查本次生成的内存输出；新功能检查已经落盘、人工整理或多来源混放的目录产物。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 目录/目录树合集感知质量门禁 | 交付目录中既有单个 `/goal` 文件，也有批量 `all_goals.txt` 合集文件，需要用一条目录或目录树命令做最终 CI 门禁。 | 先人工 grep 分隔线数量，分别对普通文件跑 `--lint-goal-file`、对合集跑 `--lint-goal-bundle`，再手动合并退出码和报告。 | `--lint-goal-dir` / `--lint-goal-tree` 自动识别合集并嵌入块级报告，任一块失败即可让目录级门禁失败。 | 不是新增展示模式，而是修复目录级质量门禁的覆盖盲点，把第 18 轮块级能力接入第 11/17 轮目录交付主流程。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -636,7 +667,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 18 轮，下一轮将进入第 19 轮审查；累计修复 3 个问题，新增 18 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 19 轮审查清单已建立，正在修复目录/目录树对合集文件的漏检盲点；累计修复 3 个已完成问题，新增 18 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
