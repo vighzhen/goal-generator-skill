@@ -813,7 +813,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量画像风险阈值门禁 | 第 22 轮的 `--fail-on-high-risk` 只能在 high 风险任务出现时失败；有些团队希望 medium 风险任务也先进入人工复核，或在更严格的发布窗口中阻断所有非 low 风险任务。当前只能外部解析 `--profile-tasks --report-json` 自行判断阈值。 | 在 `scripts/batch_generate.py --profile-tasks` 中新增 `--fail-on-risk-level <low|medium|high>`，按风险等级阈值统计命中任务并决定退出码；保留 `--fail-on-high-risk` 既有语义，并在报告中加入阈值门禁摘要，便于 CI 直接消费。同步更新 README 与 SKILL。 | 待实现 | - |
+| 1 | 批量画像风险阈值门禁 | 第 22 轮的 `--fail-on-high-risk` 只能在 high 风险任务出现时失败；有些团队希望 medium 风险任务也先进入人工复核，或在更严格的发布窗口中阻断所有非 low 风险任务。当前只能外部解析 `--profile-tasks --report-json` 自行判断阈值。 | 在 `scripts/batch_generate.py --profile-tasks` 中新增 `--fail-on-risk-level <low|medium|high>`，按风险等级阈值统计命中任务并决定退出码；保留 `--fail-on-high-risk` 既有语义，并在报告中加入阈值门禁摘要，便于 CI 直接消费。同步更新 README 与 SKILL。 | 已实现 | 76bb9ae |
 
 #### 去重审查
 
@@ -829,6 +829,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量画像风险阈值门禁 | 团队希望按发布阶段或任务类型调整批量清单的风险准入，例如默认阻断 high，发版前阻断 medium/high。 | 先生成 profile 报告，再写外部脚本扫描 `risk_level` 计数并决定 CI 退出码。 | 一条命令完成画像、阈值统计和失败退出，并在结构化报告中保留门禁结果，便于复核。 | 不是报告字段微调，而是把可配置风险策略接入批量任务分派门禁。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（通过 `PYTHONPYCACHEPREFIX=/tmp/pycache` 避免沙箱缓存写入问题）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "fail-on-risk-level"`、示例清单 `--profile-tasks --fail-on-risk-level high --summary-only --report-json` 通过并断言 `risk_gate.passed=true`、示例清单 `--profile-tasks --fail-on-risk-level medium --summary-only --report-json` 返回失败退出码并断言命中 2 个 medium 风险任务、`--fail-on-high-risk` 兼容性验证通过、未配合 `--profile-tasks` 使用 `--fail-on-risk-level` 返回参数错误、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -837,7 +841,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 24 轮审查清单已建立，正在实现批量画像风险阈值门禁；累计修复 4 个已完成问题，新增 23 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 24 轮已完成，准备进入第 25 轮；累计修复 4 个已完成问题，新增 24 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -863,4 +867,5 @@
 - 第 21 轮：批量任务画像矩阵（bd49536）
 - 第 22 轮：批量画像高风险门禁（dd4b688）
 - 第 23 轮：团队默认值语义门禁（2d365d8）
-剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks` 的类型/复杂度/风险统计依赖任务描述或字段文本，字段-only 或多意图任务可能被关键词启发式归类到近似类型；`--fail-on-high-risk` 使用 `risk_level=high` 作为固定门禁阈值，团队若需要自定义风险阈值仍需本轮新增门禁完成后再启用；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
+- 第 24 轮：批量画像风险阈值门禁（76bb9ae）
+剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
