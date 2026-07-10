@@ -142,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.review_board_md:
+        return _run_review_board_mode(tasks, args)
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
@@ -206,6 +208,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
+    parser.add_argument("--review-board-md", help="按可执行度等级分组写出批量任务 Markdown 评审看板。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
@@ -375,6 +378,23 @@ def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int 
             f"({score.get('readiness_level', 'unknown')})",
             file=sys.stderr,
         )
+
+
+def _run_review_board_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
+    start_time = time.perf_counter()
+    scored_tasks, skipped_tasks = _build_score_summaries(tasks, args.dedupe)
+    stats = BatchStats(len(scored_tasks), len(skipped_tasks), time.perf_counter() - start_time)
+    board_path = Path(args.review_board_md)
+    _write_review_board_markdown(scored_tasks, skipped_tasks, stats, board_path)
+    if args.report_json:
+        _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json))
+    if not args.summary_only:
+        print(f"已写入评审看板：{board_path}")
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
 
 
 def _run_export_fields_json_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
@@ -1389,6 +1409,69 @@ def _write_score_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_review_board_markdown(
+    scored_tasks: list[TaskScoreSummary],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    board_path: Path,
+) -> None:
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Batch Goal Review Board",
+        "",
+        f"- 可评审任务：{stats.success_count}",
+        f"- 跳过任务：{stats.skipped_count}",
+        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
+        "",
+    ]
+    for level in ("high_risk", "incomplete", "needs_review", "ready"):
+        group = [scored_task for scored_task in scored_tasks if scored_task.score.get("readiness_level") == level]
+        lines.extend(_review_board_group(level, group))
+        lines.append("")
+    lines.extend(["## 跳过任务", ""])
+    lines.extend(_markdown_skipped_table(skipped_tasks))
+    board_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _review_board_group(level: str, scored_tasks: list[TaskScoreSummary]) -> list[str]:
+    lines = [f"## {_review_level_title(level)}", ""]
+    if not scored_tasks:
+        lines.append("无任务。")
+        return lines
+    lines.extend(
+        [
+            "| 任务 | 分数 | 风险 | 缺失要素 | 下一步 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for scored_task in sorted(scored_tasks, key=lambda item: _score_value(item.score)):
+        score = scored_task.score
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(scored_task.task.name),
+                    _markdown_cell(str(score.get("readiness_score", ""))),
+                    _markdown_cell(f"{score.get('risk_level', 'unknown')}({score.get('risk_score', '')})"),
+                    _markdown_cell(_score_missing_labels(score)),
+                    _markdown_cell(str(score.get("next_action", ""))),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _review_level_title(level: str) -> str:
+    titles = {
+        "high_risk": "High Risk（高风险，优先补信息）",
+        "incomplete": "Incomplete（信息不足）",
+        "needs_review": "Needs Review（可复核后生成）",
+        "ready": "Ready（基本可生成）",
+    }
+    return titles.get(level, level)
 
 
 def _markdown_score_table(scored_tasks: list[TaskScoreSummary]) -> list[str]:
