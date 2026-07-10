@@ -1312,9 +1312,15 @@ def format_draft_goal(description: str) -> str:
 def _infer_profile(text: str) -> tuple[str, str, dict[str, str]]:
     lowered_text = text.lower()
     for profile_id, label, keywords, template in PROFILE_RULES:
-        if _contains_any(lowered_text, keywords):
+        if _matches_profile(profile_id, text, lowered_text, keywords):
             return profile_id, label, template
     return "generic", "通用编码任务", DEFAULT_PROFILE_TEMPLATE
+
+
+def _matches_profile(profile_id: str, text: str, lowered_text: str, keywords: tuple[str, ...]) -> bool:
+    if profile_id == "testing":
+        return _mentions_test_task(text) or _contains_any(lowered_text, ("覆盖率", "用例"))
+    return _contains_any(lowered_text, keywords)
 
 
 def _estimate_complexity(text: str, missing: list[str]) -> tuple[str, list[str]]:
