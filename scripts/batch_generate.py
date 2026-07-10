@@ -128,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
     if args.report_json:
-        _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json))
+        _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json), args.output_dir, args.output_file)
     print(_format_summary(stats))
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -695,26 +695,37 @@ def _write_report_json(
     skipped_tasks: list[SkippedTask],
     stats: BatchStats,
     report_path: Path,
+    output_dir: str | None,
+    output_file: str | None,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "success_count": stats.success_count,
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "tasks": [_task_report(output) for output in outputs],
+        "tasks": [_task_report(output, output_dir, output_file) for output in outputs],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _task_report(output: TaskOutput) -> dict[str, object]:
+def _task_report(output: TaskOutput, output_dir: str | None, output_file: str | None) -> dict[str, object]:
     return {
         "name": output.task_name,
         "file_slug": output.file_slug,
+        "output_path": _report_output_path(output, output_dir, output_file),
         "present": output.present_keys,
         "missing_before_defaults": output.missing_before_defaults,
         "defaulted": output.defaulted_keys,
     }
+
+
+def _report_output_path(output: TaskOutput, output_dir: str | None, output_file: str | None) -> str:
+    if output_dir:
+        return str(Path(output_dir) / f"{output.file_slug}{GOAL_FILE_SUFFIX}")
+    if output_file:
+        return output_file
+    return ""
 
 
 def _skipped_report(skipped: SkippedTask) -> dict[str, str]:
