@@ -21,6 +21,7 @@ from generate_goal import (
     _extract_labeled_fields,
     analyze_description,
     check_redaction,
+    lint_goal_text,
     lint_fields_json_data,
     render_goal_text,
 )
@@ -117,6 +118,18 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.lint_output and (
+        args.merge_supplements
+        or args.questions
+        or args.redaction_check
+        or args.lint_fields
+        or args.plan_dependencies
+        or args.list_tasks
+        or args.dry_run
+        or args.check
+    ):
+        print("--lint-output 只能用于真实批量生成模式，请勿与分析、检查或清单模式同用。", file=sys.stderr)
+        return 1
     if args.merge_supplements:
         try:
             return _run_merge_supplements_mode(tasks, args, start_time)
@@ -143,6 +156,31 @@ def main(argv: list[str] | None = None) -> int:
     summary_only = args.summary_only or args.check
     fail_on_skipped = args.fail_on_skipped or args.check
     outputs, skipped_tasks = _process_tasks(tasks, dry_run, strict, args.dedupe, default_values, args.verbose)
+    output_lint_report = None
+    if args.lint_output:
+        if dry_run:
+            print("--lint-output 需要真实生成 /goal，请勿与 --dry-run 或 --check 同用。", file=sys.stderr)
+            return 1
+        output_lint_report = _build_output_lint_report(outputs)
+        if not output_lint_report["passed"]:
+            elapsed_seconds = time.perf_counter() - start_time
+            failed_count = int(output_lint_report["failed_count"])
+            stats = BatchStats(len(outputs) - failed_count, len(skipped_tasks) + failed_count, elapsed_seconds)
+            if args.report_json:
+                _write_report_json(
+                    outputs,
+                    skipped_tasks,
+                    stats,
+                    Path(args.report_json),
+                    args.output_dir,
+                    args.output_file,
+                    output_lint_report,
+                )
+            if not summary_only:
+                print(_format_output_lint_report(output_lint_report))
+            print(_format_lint_output_summary(output_lint_report))
+            print(_format_summary(stats))
+            return 1
     _write_outputs(outputs, args.output_dir, args.output_file, summary_only)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
@@ -154,7 +192,10 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.report_json),
             args.output_dir,
             args.output_file,
+            output_lint_report,
         )
+    if output_lint_report:
+        print(_format_lint_output_summary(output_lint_report))
     print(_format_summary(stats))
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -183,6 +224,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", action="store_true", help="按任务生成可直接发送的批量缺失要素追问文案。")
     parser.add_argument("--merge-supplements", help="读取按任务名组织的补充回答 JSON/CSV，合并回批量任务 fields 并输出新的任务 JSON。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
+    parser.add_argument("--lint-output", action="store_true", help="真实生成 /goal 后，在写出交付物前检查每个最终文本的结构和语义质量。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
@@ -1107,6 +1149,85 @@ def _format_lint_fields_summary(lint_report: dict[str, object], skipped_count: i
     )
 
 
+def _build_output_lint_report(outputs: list[TaskOutput]) -> dict[str, object]:
+    task_reports = [_output_lint_task_report(output) for output in outputs]
+    failed_count = sum(1 for report in task_reports if not report["passed"])
+    return {
+        "passed": failed_count == 0,
+        "task_count": len(task_reports),
+        "passed_count": len(task_reports) - failed_count,
+        "failed_count": failed_count,
+        "tasks": task_reports,
+    }
+
+
+def _output_lint_task_report(output: TaskOutput) -> dict[str, object]:
+    lint_report = lint_goal_text(output.content, output.task_name)
+    validation = lint_report.get("validation", {})
+    field_lint = lint_report.get("field_lint", {})
+    issues = field_lint.get("issues", []) if isinstance(field_lint, dict) else []
+    return {
+        "name": output.task_name,
+        "file_slug": output.file_slug,
+        "passed": lint_report["passed"],
+        "validation_valid": validation.get("valid", False) if isinstance(validation, dict) else False,
+        "score": field_lint.get("score", 0) if isinstance(field_lint, dict) else 0,
+        "issue_count": field_lint.get("issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "high_issue_count": field_lint.get("high_issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "missing": validation.get("missing", []) if isinstance(validation, dict) else [],
+        "issues": issues if isinstance(issues, list) else [],
+        "summary": lint_report["summary"],
+    }
+
+
+def _format_output_lint_report(lint_report: dict[str, object]) -> str:
+    lines = ["批量生成输出 /goal 自检："]
+    task_reports = lint_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        lines.append("无可检查输出。")
+        return "\n".join(lines)
+    for task_report in task_reports:
+        if isinstance(task_report, dict):
+            lines.extend(_format_output_lint_task_lines(task_report))
+    return "\n".join(lines)
+
+
+def _format_output_lint_task_lines(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    status = "通过" if task_report.get("passed") else "未通过"
+    lines = [
+        (
+            f"- {name}：{status}，得分 {task_report.get('score', 0)}，"
+            f"问题 {task_report.get('issue_count', 0)} 个，高优先级 {task_report.get('high_issue_count', 0)} 个。"
+        )
+    ]
+    if task_report.get("passed"):
+        return lines
+    issues = task_report.get("issues", [])
+    if isinstance(issues, list):
+        for issue in issues[:3]:
+            if not isinstance(issue, dict):
+                continue
+            lines.append(
+                f"  - {issue.get('label', issue.get('element', '未知要素'))}："
+                f"{issue.get('message', '')}；建议：{issue.get('suggestion', '')}"
+            )
+        if len(issues) > 3:
+            lines.append(f"  - 其余 {len(issues) - 3} 个问题请查看 --report-json。")
+    missing = task_report.get("missing", [])
+    if isinstance(missing, list) and missing:
+        lines.append(f"  - 结构缺失项：{'、'.join(str(item) for item in missing[:5])}")
+    return lines
+
+
+def _format_lint_output_summary(lint_report: dict[str, object]) -> str:
+    return (
+        "输出 /goal 自检完成："
+        f"通过 {lint_report.get('passed_count', 0)} 个，"
+        f"失败 {lint_report.get('failed_count', 0)} 个。"
+    )
+
+
 def _build_dependency_plan(tasks: list[TaskSpec]) -> dict[str, object]:
     ordered_tasks = _unique_tasks_by_name(tasks)
     known_names = {task.name for task in ordered_tasks}
@@ -1638,6 +1759,7 @@ def _write_report_json(
     report_path: Path,
     output_dir: str | None,
     output_file: str | None,
+    output_lint_report: dict[str, object] | None = None,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
@@ -1647,6 +1769,8 @@ def _write_report_json(
         "tasks": [_task_report(output, output_dir, output_file) for output in outputs],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
+    if output_lint_report is not None:
+        report["output_lint"] = output_lint_report
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

@@ -238,6 +238,9 @@ python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run
 # 从 JSON 批量生成并输出到控制台
 python3 scripts/batch_generate.py --input examples/sample_tasks.json
 
+# 从 JSON 批量生成前检查最终 /goal 文本质量，任一输出不合格则失败且不写出交付物
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-output --report-json output_lint_report.json
+
 # 从 CSV 批量分析，适合用表格工具编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
 
@@ -317,6 +320,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
 - `--questions` 不生成 `/goal` 正文，而是按任务名汇总缺失要素并生成可直接发送的追问文案；可配合 `--output-file` 保存文案，配合 `--report-json` 保存任务级缺失结构。
 - `--merge-supplements <path>` 不生成 `/goal` 正文，而是读取按任务名组织的补充回答 JSON/CSV，把补充文本、显式 6 要素字段和原任务的 `description`/`fields` 合并为新的任务 JSON；可配合 `--output-file` 保存合并清单，配合 `--report-json` 查看字段来源、未匹配补充和剩余缺口，配合 `--check` 在仍缺要素、输入错误或补充任务名未匹配时失败退出。
+- `--lint-output` 只用于真实生成模式，不与 `--dry-run` 或 `--check` 同用；它会在写出 stdout/`--output-file`/`--output-dir` 交付物前逐任务检查最终 `/goal` 文本的结构和语义质量，任一输出未通过时退出码为 1，并把 `output_lint` 写入 `--report-json`。
 - `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。
 - `--redaction-check` 不生成 `/goal` 正文，而是逐个任务审计名称、描述和 6 要素字段值中的 token、密钥、邮箱、URL 等敏感片段；发现风险时退出码为 1，并在报告中提供脱敏预览。
 - `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
@@ -388,6 +392,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
 - 批量任务 6 要素字段语义质量门禁
+- 批量生成后最终 `/goal` 输出自检门禁
 - 批量任务依赖计划、未知依赖和循环依赖检查
 - 批量任务依赖顺序生成和检查
 - 批量 JSON 报告、输出目录、输出文件、团队默认值配置
