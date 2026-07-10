@@ -1105,6 +1105,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "allowed-path-roots"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`scripts/` 内路径任务 `--dry-run --allowed-path-roots scripts` 通过并断言成功 1/跳过 0、含 `README.md` 越界路径清单返回失败退出码并断言“任务路径超出允许根目录”、缺失路径清单返回失败退出码并断言“缺少任务路径”、真实生成、`--check` 与 `--lint-output` 组合均返回失败退出码并保留越界原因、`--inspect-paths` 无效组合与空根目录参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 33 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 33 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3215 行 sha256 515a0d97bd563193、SKILL.md 144 行 sha256 bde44dc460d12f24、README.md 498 行 sha256 4dc593e9f2ac1efe、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 32 轮路径根目录白名单门禁、依赖计划和批量生成去重能力；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务名称唯一门禁 | 批量依赖、补充回答合并和报告审计都依赖任务名作为人类可读标识；当前 `--dedupe` 只按任务名+描述跳过完全重复任务，`--plan-dependencies` 会报告重复名但主生成/dry-run/lint-output 仍允许同名不同描述任务进入输出，容易造成补充回答或依赖引用歧义。 | 在 `scripts/batch_generate.py` 新增 `--require-unique-task-names`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；同名任务全部跳过并返回失败退出码，报告保留重复任务名原因和改名建议。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务名称唯一门禁 | `--dedupe` | `--dedupe` 静默跳过任务名和描述都相同的重复项；新功能阻断所有同名任务（即使描述不同），用于避免身份歧义而不是去除完全重复输入。 | 通过 |
+| 批量任务名称唯一门禁 | `--plan-dependencies` 重复名问题 | 依赖计划会在分析模式报告重复名；新功能把唯一性要求接入主生成/dry-run/check/lint-output 退出码。 | 通过 |
+| 批量任务名称唯一门禁 | `--list-tasks` | `--list-tasks` 只预览名称，不阻断重复；新功能直接阻止同名任务进入生成结果。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务名称唯一门禁 | 团队批量生成前要求每个任务名唯一，避免依赖、补充回答、报告和输出文件审计时出现歧义。 | 先运行依赖计划或外部脚本检查重复名，或人工阅读清单；真实生成仍可能输出带自动 slug 的同名任务。 | 一条命令在主生成流程中阻断同名任务并给出改名建议，降低批量任务身份歧义。 | 新增身份唯一性准入门禁，不是去重、依赖计划报告或列表展示的变体。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1113,7 +1143,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 32 轮已完成，准备进入第 33 轮；累计修复 4 个已完成问题，新增 32 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 33 轮审查清单已建立，正在实现批量任务名称唯一门禁；累计修复 4 个已完成问题，新增 32 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
