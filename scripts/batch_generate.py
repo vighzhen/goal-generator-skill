@@ -144,8 +144,6 @@ def main(argv: list[str] | None = None) -> int:
     _write_outputs(outputs, args.output_dir, args.output_file, summary_only)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
-    if args.index_md:
-        _write_output_index_markdown(outputs, stats, Path(args.index_md), args.output_dir, args.output_file)
     if args.report_json:
         _write_report_json(
             outputs,
@@ -172,7 +170,6 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
-    parser.add_argument("--index-md", help="为批量输出产物写入 Markdown 导航索引。")
     parser.add_argument("--include-profile", action="store_true", help="在 JSON 报告中附加任务类型、风险评分和追问策略画像。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
@@ -850,48 +847,6 @@ def _write_report_json(
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_output_index_markdown(
-    outputs: list[TaskOutput],
-    stats: BatchStats,
-    index_path: Path,
-    output_dir: str | None,
-    output_file: str | None,
-) -> None:
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# Batch Goal Output Index",
-        "",
-        f"- 产物数量：{stats.success_count}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-    ]
-    if not outputs:
-        lines.append("无输出产物。")
-    else:
-        lines.extend(
-            [
-                "| 任务 | 输出路径 | 缺失要素 | 默认填充 |",
-                "| --- | --- | --- | --- |",
-            ]
-        )
-        for output in outputs:
-            output_path = _report_output_path(output, output_dir, output_file) or "-"
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        _markdown_cell(output.task_name),
-                        _markdown_cell(output_path),
-                        _markdown_cell(_format_labels(output.missing_before_defaults)),
-                        _markdown_cell(_format_labels(output.defaulted_keys)),
-                    ]
-                )
-                + " |"
-            )
-    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_task_list_report(
