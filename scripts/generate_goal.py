@@ -416,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.redaction_check:
             _emit_output(json.dumps(check_redaction(args.redaction_check), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.readiness_md:
+            _emit_output(format_readiness_markdown(args.readiness_md), args.output_file)
+            return 0
         if args.risk_card:
             _emit_output(format_risk_card(args.risk_card), args.output_file)
             return 0
@@ -471,6 +474,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
     parser.add_argument("--goal-json", help="生成面向 IDE、机器人或流水线的 Goal JSON 草稿，包含 6 要素、复核状态、校验结果和下一步命令。")
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
+    parser.add_argument("--readiness-md", help="生成紧凑 Markdown 就绪度卡片，展示可执行度、风险、6 要素状态和下一步命令。")
     parser.add_argument("--risk-card", help="生成单任务 Markdown 风险卡片，汇总风险因素、复杂度和缓解建议。")
     parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
@@ -527,6 +531,7 @@ def build_capabilities() -> dict[str, object]:
                 "--compare",
                 "--goal-json",
                 "--redaction-check",
+                "--readiness-md",
                 "--risk-card",
                 "--review-card",
                 "--questions-json",
@@ -625,6 +630,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "检查敏感信息",
                 "scenario": "把任务描述分享给机器人、Issue 或外部系统前，先发现 token、邮箱、URL 等可能需要脱敏的内容。",
                 "command": "python3 scripts/generate_goal.py --redaction-check '修复登录问题，token=abcdef1234567890，联系 owner@example.com'",
+            },
+            {
+                "name": "生成 Markdown 就绪度卡片",
+                "scenario": "需要快速判断一个任务是否可直接生成 /goal，并查看 6 要素状态和下一步命令。",
+                "command": "python3 scripts/generate_goal.py --readiness-md '给项目加单元测试'",
             },
             {
                 "name": "生成 Markdown 评审卡片",
@@ -1219,6 +1229,77 @@ def _redaction_recommended_action(risk_level: str, findings: list[dict[str, obje
     if risk_level == "high":
         return "共享前必须移除或替换所有 high/critical 敏感片段，并重新运行 --redaction-check。"
     return "共享前建议确认发现项是否可公开；不能公开时使用 redacted_preview 或占位符替换。"
+
+
+def format_readiness_markdown(description: str) -> str:
+    """生成适合快速判断任务能否进入 /goal 的 Markdown 就绪度卡片。"""
+    if not description.strip():
+        raise ValueError("--readiness-md 不能为空，请提供任务描述")
+    analysis = analyze_description(description)
+    score = score_description(description)
+    profile = build_task_profile(description)
+    task_type = profile.get("task_type", {})
+    task_label = task_type.get("label", "未知") if isinstance(task_type, dict) else "未知"
+    missing = [key for key in analysis["missing"] if key in ELEMENT_ORDER]
+    ready_text = "是" if not missing and score.get("readiness_level") == "ready" else "否，仍需复核或补信息"
+    lines = [
+        "# Goal Readiness Card",
+        "",
+        f"- 描述：{_markdown_inline(_normalize_text(description)[:TEXT_PREVIEW_LENGTH])}",
+        f"- 任务类型：{_markdown_inline(str(task_label))}",
+        f"- 可执行度：{score.get('readiness_score', 0)}/100（{score.get('readiness_level', 'unknown')}）",
+        f"- 风险：{profile.get('risk_level', 'unknown')}（{profile.get('risk_score', 0)}）",
+        f"- 可直接生成：{ready_text}",
+        f"- 下一步：{_markdown_inline(str(score.get('next_action', '')))}",
+        f"- 推荐命令：`{_markdown_inline(str(score.get('recommended_command', ''))).replace('`', '')}`",
+        "",
+        "## 6 要素状态",
+        "",
+    ]
+    lines.extend(_readiness_element_table(analysis))
+    lines.extend(["", "## 优先补齐", ""])
+    lines.extend(_readiness_missing_actions(missing, profile))
+    return "\n".join(lines)
+
+
+def _readiness_element_table(analysis: AnalysisResult) -> list[str]:
+    lines = [
+        "| 要素 | 状态 | 说明 |",
+        "| --- | --- | --- |",
+    ]
+    present = analysis["present"]
+    for key in ELEMENT_ORDER:
+        if key in present:
+            status = "✅ 已识别"
+            note = str(present.get(key, ""))
+        else:
+            status = "⚠️ 需补齐"
+            note = MISSING_REASON_TEMPLATES[key]
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(ELEMENT_LABELS[key]),
+                    _markdown_cell(status),
+                    _markdown_cell(note),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _readiness_missing_actions(missing: list[str], profile: dict[str, object]) -> list[str]:
+    if not missing:
+        return ["- 6 要素均已识别；生成前仍建议人工快速复核边界、验证命令和受阻条件。"]
+    recommendations = _recommended_field_mapping(profile)
+    actions: list[str] = []
+    for key in _prioritized_missing_keys(missing):
+        actions.append(
+            f"- {ELEMENT_LABELS[key]}：{_markdown_inline(str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key])))}"
+        )
+    actions.append("- 可直接复制 `推荐命令` 生成更详细的缺失项解释或追问文案。")
+    return actions
 
 
 def format_review_card(description: str) -> str:

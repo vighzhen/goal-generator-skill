@@ -133,6 +133,16 @@ python3 scripts/generate_goal.py --redaction-check "修复登录问题，token=a
 
 输出 JSON 中的 `safe_to_share` 为 `false` 时，先按 `redacted_preview` 或 `recommended_action` 替换敏感片段，再继续生成 `/goal`。
 
+### 生成 Markdown 就绪度卡片
+
+使用 `--readiness-md` 可生成一份轻量 Markdown 卡片，快速判断任务是否能直接进入 `/goal` 生成，并查看 6 要素状态、风险、下一步动作和推荐命令：
+
+```bash
+python3 scripts/generate_goal.py --readiness-md "给项目加单元测试"
+```
+
+该功能适合把单个需求贴到 PR、Issue 或群聊前做快速评审；如果卡片显示仍需补齐要素，可继续使用推荐命令生成更详细的追问文案。
+
 ### 校验 6 要素字段 JSON
 
 使用 `--validate-fields-json` 可在执行 `--generate --from-json` 前检查 JSON 是否包含完整且非空的 6 要素字段、是否存在未知字段，以及是否能正常渲染成 `/goal`：
@@ -433,6 +443,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 单任务可编辑 6 要素字段建议 JSON
 - 单任务 Goal JSON 草稿（含复核状态、校验结果和下一步命令）
 - 单任务敏感信息检查和脱敏预览
+- 单任务 Markdown 就绪度卡片
 - 单任务 6 要素字段 JSON 质量校验
 - 批量可编辑 6 要素字段 JSON 草稿导出
 - 批量 `/goal` 可执行度评分摘要
