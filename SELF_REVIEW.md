@@ -833,6 +833,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（通过 `PYTHONPYCACHEPREFIX=/tmp/pycache` 避免沙箱缓存写入问题）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "fail-on-risk-level"`、示例清单 `--profile-tasks --fail-on-risk-level high --summary-only --report-json` 通过并断言 `risk_gate.passed=true`、示例清单 `--profile-tasks --fail-on-risk-level medium --summary-only --report-json` 返回失败退出码并断言命中 2 个 medium 风险任务、`--fail-on-high-risk` 兼容性验证通过、未配合 `--profile-tasks` 使用 `--fail-on-risk-level` 返回参数错误、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 25 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 25 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2919 行、batch_generate.py 2709 行、SKILL.md 144 行、README.md 462 行、goal_template.txt 33 行、elements.md 211 行、anti_laziness.md 158 行），并复核 CLI 参数、文档标题和待办标记；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 单任务语义质量最低分门禁 | `--lint-fields-json` 和 `--lint-goal-file` 已能给出语义得分，但退出码只取决于结构和高严重度问题；团队若希望“低于 90 分不可进入执行”，目前必须外部解析 JSON。 | 在 `scripts/generate_goal.py` 新增 `--min-lint-score <0-100>`，配合 `--lint-fields-json` 或 `--lint-goal-file` 使用；在原有 lint 结果中增加 `score_gate`，当得分低于阈值时将 `passed` 置为 false 并返回非零退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 单任务语义质量最低分门禁 | `--lint-fields-json` | 既有命令只报告得分和固定通过状态；新功能把团队自定义最低分接入退出码，不需要外部脚本解析 JSON。 | 通过 |
+| 单任务语义质量最低分门禁 | `--lint-goal-file` | 既有命令检查最终 `/goal` 文件结构和语义；新功能允许对最终文本施加更高分数阈值，覆盖交付门禁策略。 | 通过 |
+| 单任务语义质量最低分门禁 | 批量 `--lint-fields` / `--lint-output` | 批量门禁面向任务清单或输出集合；本功能先补齐单任务字段和单个 `/goal` 文件的可配置质量阈值，使用场景和输入对象不同。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 单任务语义质量最低分门禁 | 团队或 CI 希望在生成前字段 JSON 或生成后 `/goal` 文件得分低于固定阈值时直接失败。 | 运行 lint 后再写 jq/Python 解析 `score` 或 `field_lint.score`，并自行维护退出码逻辑。 | 一条命令完成 lint 和阈值判断，报告中保留 `score_gate` 证据，便于审计和脚本接入。 | 不是新增展示字段，而是把评分制度接入质量门禁退出码，补足可配置质量策略。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -841,7 +871,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 24 轮已完成，准备进入第 25 轮；累计修复 4 个已完成问题，新增 24 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 25 轮审查清单已建立，正在实现单任务语义质量最低分门禁；累计修复 4 个已完成问题，新增 24 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
