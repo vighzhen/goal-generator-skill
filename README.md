@@ -83,6 +83,16 @@ python3 scripts/generate_goal.py --review-card "给项目加单元测试"
 
 该功能适合把任务质量评审结果贴到 PR、Issue、评审文档或团队群聊中。
 
+### 生成风险卡片
+
+使用 `--risk-card` 可把单个任务的风险等级、风险因素、复杂度、缺失要素和缓解建议合成 Markdown：
+
+```bash
+python3 scripts/generate_goal.py --risk-card "批量迁移数据库配置读取逻辑，保持公共 API 和错误码兼容"
+```
+
+该功能适合高风险任务评审、迁移任务评审或 PR 前置检查。
+
 ### 生成机器可读追问包
 
 使用 `--questions-json` 可把缺失要素、追问优先级、缺失原因、推荐补法、评分和下一步命令合成结构化 JSON：
@@ -388,6 +398,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 任务类型画像与 6 要素模板推荐
 - 单任务 `/goal` 可执行度评分和下一步建议
 - 单任务候选描述可执行度对比
+- 单任务 Markdown 风险卡片
 - 单任务 Markdown 评审卡片
 - 单任务机器可读追问包 JSON
 - 单任务可编辑 6 要素字段建议 JSON

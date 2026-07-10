@@ -375,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.output_file,
             )
             return 0
+        if args.risk_card:
+            _emit_output(format_risk_card(args.risk_card), args.output_file)
+            return 0
         if args.review_card:
             _emit_output(format_review_card(args.review_card), args.output_file)
             return 0
@@ -425,6 +428,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
+    parser.add_argument("--risk-card", help="生成单任务 Markdown 风险卡片，汇总风险因素、复杂度和缓解建议。")
     parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
@@ -478,6 +482,7 @@ def build_capabilities() -> dict[str, object]:
                 "--profile",
                 "--score",
                 "--compare",
+                "--risk-card",
                 "--review-card",
                 "--questions-json",
                 "--suggest-fields",
@@ -567,6 +572,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成 Markdown 评审卡片",
                 "scenario": "需要把一个任务的评分、风险、缺失项和追问文案贴到 PR、Issue 或群聊。",
                 "command": "python3 scripts/generate_goal.py --review-card '给项目加单元测试'",
+            },
+            {
+                "name": "生成风险卡片",
+                "scenario": "评审高风险任务时，需要把风险因素、复杂度和缓解建议贴到 PR 或评审文档。",
+                "command": "python3 scripts/generate_goal.py --risk-card '批量迁移数据库配置读取逻辑，保持公共 API 和错误码兼容'",
             },
             {
                 "name": "生成机器可读追问包",
@@ -1000,6 +1010,70 @@ def format_review_card(description: str) -> str:
     lines.extend(["", "## 可直接发送的追问", ""])
     lines.append(_markdown_block(str(explain.get("next_prompt", ""))))
     return "\n".join(lines)
+
+
+def format_risk_card(description: str) -> str:
+    """生成便于评审高风险任务的 Markdown 风险卡片。"""
+    if not description.strip():
+        raise ValueError("--risk-card 不能为空，请提供任务描述")
+    profile = build_task_profile(description)
+    score = score_description(description)
+    complexity = profile.get("complexity", {})
+    complexity_level = complexity.get("level", "unknown") if isinstance(complexity, dict) else "unknown"
+    task_type = profile.get("task_type", {})
+    task_label = task_type.get("label", "未知") if isinstance(task_type, dict) else "未知"
+    lines = [
+        "# Goal Risk Card",
+        "",
+        f"- 描述：{_markdown_inline(_normalize_text(description)[:TEXT_PREVIEW_LENGTH])}",
+        f"- 任务类型：{_markdown_inline(str(task_label))}",
+        f"- 可执行度：{score.get('readiness_score', 0)}/100（{score.get('readiness_level', 'unknown')}）",
+        f"- 风险：{profile.get('risk_level', 'unknown')}（{profile.get('risk_score', 0)}）",
+        f"- 复杂度：{_markdown_inline(str(complexity_level))}",
+        "",
+        "## 风险因素",
+        "",
+    ]
+    lines.extend(_risk_factor_lines(profile))
+    lines.extend(["", "## 缺失要素与缓解建议", ""])
+    lines.extend(_risk_mitigation_table(score, profile))
+    lines.extend(["", "## 建议下一步", ""])
+    lines.append(f"- {_markdown_inline(str(score.get('next_action', '')))}")
+    lines.append(f"- 推荐命令：`{_markdown_inline(str(score.get('recommended_command', ''))).replace('`', '')}`")
+    return "\n".join(lines)
+
+
+def _risk_factor_lines(profile: dict[str, object]) -> list[str]:
+    factors = profile.get("risk_factors", [])
+    factor_values = [str(factor) for factor in factors] if isinstance(factors, list) else []
+    if not factor_values:
+        return ["- 未发现明显高风险信号。"]
+    return [f"- {_markdown_inline(factor)}" for factor in factor_values]
+
+
+def _risk_mitigation_table(score: dict[str, object], profile: dict[str, object]) -> list[str]:
+    missing = score.get("missing", [])
+    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
+    if not missing_keys:
+        return ["无缺失要素；仍建议人工复核边界、验证命令和受阻条件。"]
+    recommendations = _recommended_field_mapping(profile)
+    lines = [
+        "| 要素 | 风险说明 | 缓解建议 |",
+        "| --- | --- | --- |",
+    ]
+    for key in missing_keys:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(ELEMENT_LABELS[key]),
+                    _markdown_cell(MISSING_REASON_TEMPLATES[key]),
+                    _markdown_cell(str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]))),
+                ]
+            )
+            + " |"
+        )
+    return lines
 
 
 def build_question_pack(description: str) -> dict[str, object]:

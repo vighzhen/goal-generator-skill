@@ -517,7 +517,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务风险 Markdown 卡片 | 用户在评审高风险任务时，需要把风险等级、风险因素、复杂度原因和缺失要素整理成可读材料；当前 --profile 是 JSON，不适合直接贴给需求方。 | 在 generate_goal.py 新增 --risk-card <description>，输出风险评分、复杂度、风险因素、缺失要素和缓解建议 Markdown。 | 待实现 | - |
+| 1 | 单任务风险 Markdown 卡片 | 用户在评审高风险任务时，需要把风险等级、风险因素、复杂度原因和缺失要素整理成可读材料；当前 --profile 是 JSON，不适合直接贴给需求方。 | 在 generate_goal.py 新增 --risk-card <description>，输出风险评分、复杂度、风险因素、缺失要素和缓解建议 Markdown。 | 已实现 | 待提交 |
 | 2 | 批量风险 Markdown 报告 | 团队批量清单需要按风险分数审计任务，快速找出高风险任务及原因；当前 profile-summary 只适合终端/JSON，不提供可分享的风险因素报告。 | 在 batch_generate.py 新增 --risk-report-md <path>，输出每个任务的风险等级、风险因素、缺失要素和下一步缓解动作 Markdown。 | 待实现 | - |
 
 ### 本轮总结
