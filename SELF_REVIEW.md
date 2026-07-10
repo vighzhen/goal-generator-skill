@@ -342,6 +342,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py /tmp/dependency_order_tasks.json --dependency-order --list-tasks` 顺序断言、`--dependency-order --dry-run` 顺序断言、未知依赖失败退出码断言、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
+## 第 11 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 11 轮要求重新通读全部 7 个范围内文件及前 10 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮聚焦补齐批量输出后的 `/goal` 文件目录级质量门禁。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `/goal` 目录语义质量门禁 | 批量生成到 `--output-dir` 或人工整理多个 `/goal` 文本后，用户只能逐个运行 `--lint-goal-file`，很容易漏检某个最终交付文件；当前缺少对最终 `/goal` 文件目录的一次性质量闸门。 | 在 `scripts/generate_goal.py` 新增 `--lint-goal-dir <dir>`，扫描目录内 `.txt` 目标文件，逐个复用结构与语义质量门禁，输出目录级汇总、失败文件详情和 CI 退出码；同步更新 README 和 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| `/goal` 目录语义质量门禁 | `--lint-goal-file` | 单文件命令只能审计一个最终 `/goal` 文本；新功能面向批量生成目录或人工交付目录，提供一次性目录级通过/失败门禁，避免漏检最终交付物。 | 通过 |
+| `/goal` 目录语义质量门禁 | 批量 `--lint-fields` | `--lint-fields` 检查生成前的任务字段清单；新功能检查已经生成或手工编辑后的最终 `/goal` 文本目录，输入来源和流程阶段不同。 | 通过 |
+| `/goal` 目录语义质量门禁 | `--validate-goal-file` | 结构校验只覆盖单文件和段落提示是否存在；新功能对目录内每个最终文件同时做结构和语义质量门禁，并聚合失败退出码。 | 通过 |
+| `/goal` 目录语义质量门禁 | `--report-json` / 输出目录能力 | 报告和输出目录只是结果承载方式；新功能新增生成后质量审计行为，发现不合格文件并阻止目录级交付，不是输出样式变化。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| `/goal` 目录语义质量门禁 | 批量生成或人工收集多个 `/goal` 文件后，交付前需要确认每个最终文本都结构完整且 6 要素不空泛。 | 写 shell 循环逐个跑 `--lint-goal-file`、手工检查退出码和失败详情，或只抽查部分文件，容易漏掉低质量最终指令。 | 一条命令完成目录级最终交付审计，直接给出通过/失败数量和不合格文件问题，适合 CI 或交付前质量闸门。 | 从“单个最终文件检查”扩展到“最终交付目录门禁”，覆盖批量生成后的质量保证环节，而不是同一信息的展示变体。 | 达标 |
+
+### 本轮总结
+
+进行中：审查清单已完成，暂未发现 P0/P1 问题，准备实现 `/goal` 目录语义质量门禁并验证。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -350,7 +385,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 10 轮，准备进入第 11 轮；累计修复 2 个问题，新增 10 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 11 轮审查清单已完成，正在实现目录级 `/goal` 质量门禁；累计修复 2 个问题，新增 10 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
