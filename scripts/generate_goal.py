@@ -517,6 +517,7 @@ def build_capabilities() -> dict[str, object]:
                 "--score-summary",
                 "--score-report-md",
                 "--review-board-md",
+                "--risk-report-md",
                 "--questions-md",
                 "--fail-below-score",
                 "--export-fields-json",
@@ -654,6 +655,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量评审看板",
                 "scenario": "团队希望按 ready/needs_review/incomplete/high_risk 分组评审任务清单。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --review-board-md review_board.md",
+            },
+            {
+                "name": "批量风险报告",
+                "scenario": "团队需要按风险分数审计任务清单，并查看每个任务的风险因素和缓解动作。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --risk-report-md risk_report.md",
             },
             {
                 "name": "批量追问 Markdown 包",
