@@ -551,7 +551,6 @@ def build_capabilities() -> dict[str, object]:
                 "--report-json",
                 "--report-md",
                 "--missing-report-md",
-                "--field-status-csv",
                 "--index-md",
                 "--include-profile",
                 "--verbose",
@@ -660,11 +659,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量缺失要素报告",
                 "scenario": "团队只想聚焦每个任务缺哪些信息、风险多高以及该怎么补齐。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --missing-report-md missing_report.md",
-            },
-            {
-                "name": "批量字段状态 CSV",
-                "scenario": "团队希望把每个任务 6 要素的 present/defaulted/missing 状态导入电子表格筛选。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --field-status-csv field_status.csv",
             },
         ],
     }
