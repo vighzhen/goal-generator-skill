@@ -1,0 +1,33 @@
+==================== /goal 指令开始 ====================
+/goal 请新建并切换到 `{BRANCH_NAME}` 分支，完成以下目标：{OUTCOME}。验证方式为：{VERIFICATION_SURFACE}。约束为：{CONSTRAINTS}。任务边界为：{BOUNDARIES}。迭代策略为：{ITERATION_POLICY}。受阻停止条件为：{BLOCKED_STOP_CONDITION}。全过程必须保持改动可审计、可验证、可回滚。
+
+强制要求：
+1. 禁止以“风险大”“没有必要”“时间不足”为笼统理由跳过范围内工作。
+2. 确需跳过时必须给出路径、证据、原因和影响范围，并满足 {BLOCKED_STOP_CONDITION}。
+3. 禁止把多个独立改动合并成一个大 commit；每个独立改动必须先验证再提交。
+4. 禁止为了通过验证而删除、弱化或绕过现有测试、类型检查或质量检查。
+5. 禁止擅自扩大边界；发现范围外问题只记录，不纳入本轮改动。
+6. 最终回复必须列出完成项、验证命令、commit 列表、未完成项和剩余风险。
+
+提交规则：
+- 每完成一个独立改动后，先执行 {LOCAL_VERIFICATION_COMMAND}，再执行 `git add` 和 `git commit`。
+- Commit message 使用 `{COMMIT_MESSAGE_FORMAT}` 格式。
+- 示例：`{COMMIT_EXAMPLE_1}`；`{COMMIT_EXAMPLE_2}`；`{COMMIT_EXAMPLE_3}`。
+- 预期提交数量为 {EXPECTED_COMMIT_RANGE}；如果实际偏离，必须在最终回复解释原因。
+- 全部完成并通过最终验证后执行 `git checkout main && git merge {BRANCH_NAME}`。
+- 合并完成后执行 `git push -u origin main`；如果用户明确要求不推送，则记录跳过原因。
+
+输出文件格式：
+{IF_REPORT_NEEDED:如果任务需要生成报告或文档，使用用户指定文件名；未指定时使用 `GOAL_REPORT.md`，并包含以下 Markdown 表格。}
+# 任务报告
+| 序号 | 范围 | 改动内容 | 验证方式 | Commit | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | {PATH_OR_MODULE} | {CHANGE_SUMMARY} | {VERIFICATION_EVIDENCE} | {COMMIT_HASH} | {RISK_OR_NOTE} |
+{IF_NO_REPORT_NEEDED:如果任务不需要报告，最终回复按“变更摘要、验证结果、commit 列表、未完成项、风险”五项列出。}
+
+详细规则：
+{DETAIL_RULE_1}
+{DETAIL_RULE_2}
+{DETAIL_RULE_3}
+{DETAIL_RULE_4}
+==================== /goal 指令结束 ====================
