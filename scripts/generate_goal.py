@@ -624,6 +624,10 @@ def main(argv: list[str] | None = None) -> int:
             lint_report = lint_goal_file(args.lint_goal_file)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
+        if args.lint_goal_dir:
+            lint_report = lint_goal_dir(args.lint_goal_dir)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.validate_fields_json:
             validation = validate_fields_json_file(args.validate_fields_json)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
@@ -661,6 +665,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
     parser.add_argument("--lint-goal-file", help="检查已有 /goal 指令文件的结构和 6 要素语义质量。")
+    parser.add_argument("--lint-goal-dir", help="批量检查目录内 .txt /goal 文件的结构和 6 要素语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
@@ -715,6 +720,61 @@ def lint_goal_file(goal_file: str) -> dict[str, object]:
     """校验已有 /goal 指令文件的结构和 6 要素语义质量。"""
     goal_path = Path(goal_file)
     return lint_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def lint_goal_dir(goal_dir: str) -> dict[str, object]:
+    """批量校验目录内已有 /goal 指令文件的结构和语义质量。"""
+    directory = Path(goal_dir)
+    if not directory.exists():
+        raise ValueError(f"--lint-goal-dir 不存在：{goal_dir}")
+    if not directory.is_dir():
+        raise ValueError(f"--lint-goal-dir 必须是目录：{goal_dir}")
+    goal_files = _goal_dir_files(directory)
+    file_reports = [_goal_dir_file_report(goal_file) for goal_file in goal_files]
+    failed_reports = [report for report in file_reports if not report["passed"]]
+    passed = bool(goal_files) and not failed_reports
+    return {
+        "passed": passed,
+        "source": str(directory),
+        "file_count": len(goal_files),
+        "passed_count": len(goal_files) - len(failed_reports),
+        "failed_count": len(failed_reports),
+        "files": file_reports,
+        "summary": _goal_dir_lint_summary(passed, len(goal_files), len(failed_reports)),
+    }
+
+
+def _goal_dir_files(directory: Path) -> list[Path]:
+    return sorted(
+        (path for path in directory.iterdir() if path.is_file() and path.suffix.lower() == ".txt"),
+        key=lambda path: path.name,
+    )
+
+
+def _goal_dir_file_report(goal_file: Path) -> dict[str, object]:
+    lint_report = lint_goal_text(goal_file.read_text(encoding="utf-8"), str(goal_file))
+    field_lint = lint_report.get("field_lint", {})
+    validation = lint_report.get("validation", {})
+    issues = field_lint.get("issues", []) if isinstance(field_lint, dict) else []
+    return {
+        "path": str(goal_file),
+        "passed": lint_report["passed"],
+        "validation_valid": validation.get("valid", False) if isinstance(validation, dict) else False,
+        "score": field_lint.get("score", 0) if isinstance(field_lint, dict) else 0,
+        "issue_count": field_lint.get("issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "high_issue_count": field_lint.get("high_issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "missing": validation.get("missing", []) if isinstance(validation, dict) else [],
+        "issues": issues if isinstance(issues, list) else [],
+        "summary": lint_report["summary"],
+    }
+
+
+def _goal_dir_lint_summary(passed: bool, file_count: int, failed_count: int) -> str:
+    if not file_count:
+        return "目录内未发现可检查的 .txt /goal 文件。"
+    if passed:
+        return f"/goal 目录语义质量检查通过，共 {file_count} 个文件。"
+    return f"/goal 目录语义质量检查未通过：失败 {failed_count} 个，总计 {file_count} 个文件。"
 
 
 def lint_goal_text(goal_text: str, source: str = "") -> dict[str, object]:

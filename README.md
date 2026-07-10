@@ -182,6 +182,16 @@ python3 scripts/generate_goal.py --lint-goal-file goal.txt
 
 命令输出 `validation`、`extracted_fields`、`field_lint` 和 `summary`；结构无效或语义质量未通过时退出码为 1。
 
+### 检查 /goal 输出目录
+
+批量生成到 `--output-dir` 或人工整理多个 `/goal` 文本后，可用 `--lint-goal-dir` 一次性检查目录内所有 `.txt` 文件，避免逐个运行 `--lint-goal-file` 时漏检最终交付物：
+
+```bash
+python3 scripts/generate_goal.py --lint-goal-dir output/
+```
+
+命令按文件名稳定扫描目录直属 `.txt` 文件，输出 `file_count`、`passed_count`、`failed_count`、每个文件的结构与语义质量结果；任一文件未通过或目录内没有 `.txt` 目标文件时退出码为 1，适合批量生成后的 CI 或交付前质量门禁。
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -330,6 +340,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 已有 `/goal` 文件结构校验
 - 已有 `/goal` 文件语义质量检查
+- `/goal` 输出目录结构与语义质量门禁
 - 一键生成可复制的缺失要素追问文案
 - 原始需求与补充回答合并为 6 要素字段草稿
 - 单任务 6 要素字段语义质量检查和生成前门禁
