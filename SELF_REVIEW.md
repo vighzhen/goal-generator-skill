@@ -377,6 +377,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、高质量目录 `--lint-goal-dir` 通过断言、混合目录 `--lint-goal-dir` 失败退出码与失败文件定位断言、空目录失败退出码断言、`python3 scripts/generate_goal.py --help | grep -n "lint-goal"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
+## 第 12 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 12 轮要求重新通读全部 7 个范围内文件及前 11 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮聚焦批量任务在生成前的一次性补充信息收集体验。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量缺失信息追问文案 | 批量 JSON/CSV 清单里多个任务缺要素时，`--dry-run` 只列出缺失标签和默认填充，用户仍要逐个任务手写追问；单任务 `--questions` 不能读取批量文件，也不能结合任务字段判断每个任务还缺什么。 | 在 `scripts/batch_generate.py` 新增 `--questions` 模式，读取批量任务、结合 description 和 fields 计算每个任务未补齐要素，生成可直接发给需求方的按任务分组追问文案；支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--dependency-order`、`--summary-only`、`--output-file` 和 `--report-json`。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量缺失信息追问文案 | 单任务 `scripts/generate_goal.py --questions` | 单任务命令只处理一段描述；新功能读取 JSON/CSV 批量清单，逐任务结合已有字段与描述判断剩余缺口，并生成分组追问，覆盖多人任务清单补信息场景。 | 通过 |
+| 批量缺失信息追问文案 | 批量 `--dry-run` / `--check` | `--dry-run` 只展示缺失标签和默认填充；新功能产出可直接发送的追问文案、示例和任务级补充指引，减少人工组织问题的交互成本。 | 通过 |
+| 批量缺失信息追问文案 | 批量 `--lint-fields` | `--lint-fields` 面向已整理字段的语义质量门禁；新功能面向信息尚不完整的任务清单，帮助收集缺失 6 要素，流程阶段和用户动作不同。 | 通过 |
+| 批量缺失信息追问文案 | `--report-json` | `--report-json` 只是结构化输出渠道；新功能新增缺失信息聚合和可发送追问生成行为，不是报告格式变体。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量缺失信息追问文案 | 多个任务来自需求池、Issue 或表格，生成 `/goal` 前需要一次性向需求方补齐不同任务缺失的 6 要素。 | 先跑 `--dry-run`，人工逐条对照缺失标签和参考文档编写追问，或把每条描述复制到单任务 `--questions`。 | 一条命令生成按任务分组、带示例的可发送追问文本，并可写入文件或 JSON 报告，显著减少批量补信息的手工步骤。 | 从“单任务追问”扩展到“批量清单补信息工作流”，新增批量输入解析、任务级字段合并和交互文案聚合，不是展示样式变化。 | 达标 |
+
+### 本轮总结
+
+进行中：审查清单已完成，暂未发现 P0/P1 问题，准备实现批量缺失信息追问文案并验证。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -385,7 +420,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 11 轮，准备进入第 12 轮；累计修复 2 个问题，新增 11 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 12 轮审查清单已完成，正在实现批量缺失信息追问文案；累计修复 2 个问题，新增 11 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
