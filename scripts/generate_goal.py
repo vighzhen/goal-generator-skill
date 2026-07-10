@@ -33,6 +33,22 @@ QUESTION_EXAMPLES: dict[str, str] = {
     "iteration": "示例：每个模块一组改动，验证通过后单独 commit，预期 4-8 个 commit。",
     "blocked": "示例：缺少业务预期时停下问人；允许跳过项不超过 10%。",
 }
+MISSING_REASON_TEMPLATES: dict[str, str] = {
+    "outcome": "描述中没有同时出现明确动作和可验收对象，执行者难以判断最终交付物。",
+    "verification": "描述中缺少具体命令、检查点或验收证据，完成后无法证明没有回归。",
+    "constraints": "描述中缺少不可修改内容、兼容性或依赖限制，执行者可能为了达成目标扩大改动。",
+    "boundaries": "描述中缺少明确包含/排除范围，执行者无法稳定列出候选文件或模块。",
+    "iteration": "描述中缺少每步粒度、验证后提交和预期 commit 节奏，长期任务难以审计和回滚。",
+    "blocked": "描述中缺少允许跳过或必须停下问人的条件，执行者容易擅自猜测或偷懒跳过。",
+}
+MISSING_PRIORITY_ORDER: tuple[str, ...] = (
+    "outcome",
+    "boundaries",
+    "verification",
+    "constraints",
+    "iteration",
+    "blocked",
+)
 OUTCOME_KEYWORDS: tuple[str, ...] = (
     "实现",
     "新增",
@@ -347,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.profile:
             _emit_output(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.explain_missing:
+            _emit_output(
+                json.dumps(explain_missing_elements(args.explain_missing), ensure_ascii=False, indent=2),
+                args.output_file,
+            )
+            return 0
         if args.questions:
             _emit_output(format_question_prompt(args.questions), args.output_file)
             return 0
@@ -376,6 +398,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
+    parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
     parser.add_argument("--examples", action="store_true", help="输出常见单任务和批量命令示例 JSON。")
@@ -421,6 +444,7 @@ def build_capabilities() -> dict[str, object]:
                 "--analyze",
                 "--questions",
                 "--profile",
+                "--explain-missing",
                 "--list-templates",
                 "--template",
                 "--capabilities",
@@ -481,6 +505,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成任务画像",
                 "scenario": "追问前先判断任务类型、复杂度、风险和推荐填写方向。",
                 "command": "python3 scripts/generate_goal.py --profile '修复登录 API 在空 token 场景下偶发 500 的问题'",
+            },
+            {
+                "name": "解释缺失要素",
+                "scenario": "不只想知道缺什么，还想知道为什么缺、优先补什么和怎么补。",
+                "command": "python3 scripts/generate_goal.py --explain-missing '给项目加单元测试'",
             },
             {
                 "name": "从 JSON 生成 /goal",
@@ -618,6 +647,47 @@ def build_task_profile(description: str) -> dict[str, object]:
         "missing": analysis["missing"],
         "present": analysis["present"],
         "recommended_fields": template,
+    }
+
+
+def explain_missing_elements(description: str) -> dict[str, object]:
+    """解释任务描述缺失哪些 /goal 要素以及如何一次性补齐。"""
+    if not description.strip():
+        raise ValueError("--explain-missing 不能为空，请提供任务描述")
+    analysis = analyze_description(description)
+    profile = build_task_profile(description)
+    recommended_fields = profile.get("recommended_fields", {})
+    recommendations = recommended_fields if isinstance(recommended_fields, dict) else {}
+    missing = _prioritized_missing_keys(analysis["missing"])
+    return {
+        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
+        "task_type": profile.get("task_type", {}),
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": profile.get("risk_score", 0),
+        "missing_count": len(missing),
+        "present": analysis["present"],
+        "missing_details": [
+            _missing_detail(key, recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]), index)
+            for index, key in enumerate(missing, start=1)
+        ],
+        "ask_strategy": profile.get("ask_strategy", ""),
+        "next_prompt": format_question_prompt(description),
+    }
+
+
+def _prioritized_missing_keys(missing: list[str]) -> list[str]:
+    missing_set = set(missing)
+    return [key for key in MISSING_PRIORITY_ORDER if key in missing_set]
+
+
+def _missing_detail(key: str, recommendation: object, priority: int) -> dict[str, object]:
+    return {
+        "priority": priority,
+        "element": key,
+        "label": ELEMENT_LABELS[key],
+        "why_missing": MISSING_REASON_TEMPLATES[key],
+        "example": QUESTION_EXAMPLES[key],
+        "recommended_fill": str(recommendation),
     }
 
 

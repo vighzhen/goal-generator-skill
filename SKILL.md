@@ -15,7 +15,7 @@ description: Codex CLI Goal 指令生成器。用户描述编码任务需求，S
 
 1. **接收输入**：读取用户的一句话需求或详细需求，识别任务类型，例如代码质量优化、重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成。
 2. **判断单任务或批量任务**：如果用户一次提供多个编码任务需求，或提供 JSON/JSONL/CSV/YAML/Markdown 任务文件路径，调用 `scripts/batch_generate.py` 批量分析和生成；单个任务继续使用 `scripts/generate_goal.py`。
-3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；如果需要判断任务类型、复杂度和推荐模板，调用 `scripts/generate_goal.py --profile "用户任务描述"`；如果用户已明确任务类型，可用 `--list-templates` 和 `--template <id>` 直接取内置 6 要素模板；需要机器可读能力清单时调用 `--capabilities`，需要命令示例时调用 `--examples`；需要校验已有 `/goal` 文件时调用 `--validate-goal-file <文件>`；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
+3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；如果需要判断任务类型、复杂度和推荐模板，调用 `scripts/generate_goal.py --profile "用户任务描述"`；如果用户不理解缺失项或需要更可操作的补全优先级，调用 `scripts/generate_goal.py --explain-missing "用户任务描述"`；如果用户已明确任务类型，可用 `--list-templates` 和 `--template <id>` 直接取内置 6 要素模板；需要机器可读能力清单时调用 `--capabilities`，需要命令示例时调用 `--examples`；需要校验已有 `/goal` 文件时调用 `--validate-goal-file <文件>`；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
 4. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
 5. **一次性追问**：如果存在缺失或含糊要素，一次性列出全部缺失项并给出示例，不要逐项来回追问；需要直接生成可发送文案时可调用 `scripts/generate_goal.py --questions "用户任务描述"`。批量任务应按任务名称汇总缺失项。
 6. **整合用户补充**：用户回答后，把原始需求和补充信息合并为 6 个明确字段；如果仍缺关键技术决策，不要代替用户决定，继续一次性追问剩余关键缺口。
