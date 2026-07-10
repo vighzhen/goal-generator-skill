@@ -124,6 +124,8 @@ BLOCKED_KEYWORDS: tuple[str, ...] = (
     "不超过",
     "%",
 )
+NEGATION_PREFIXES: tuple[str, ...] = ("非", "不", "没有", "无需", "无")
+TEST_TOOL_KEYWORDS: tuple[str, ...] = ("pytest", "unittest")
 REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "README", "说明", "审计")
 DETAIL_KEYWORDS: tuple[str, ...] = ("维度", "规则", "类别", "批量", "重构", "优化", "迁移")
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
@@ -301,6 +303,31 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword.lower() in text for keyword in keywords)
 
 
+def _mentions_test_task(text: str) -> bool:
+    return _contains_unnegated_keyword(text, "测试") or _contains_unnegated_tool(text)
+
+
+def _contains_unnegated_keyword(text: str, keyword: str) -> bool:
+    start_index = 0
+    while True:
+        index = text.find(keyword, start_index)
+        if index == -1:
+            return False
+        if not _has_negation_prefix(text, index):
+            return True
+        start_index = index + len(keyword)
+
+
+def _contains_unnegated_tool(text: str) -> bool:
+    lowered_text = text.lower()
+    return any(_contains_unnegated_keyword(lowered_text, keyword) for keyword in TEST_TOOL_KEYWORDS)
+
+
+def _has_negation_prefix(text: str, keyword_index: int) -> bool:
+    compact_prefix = text[:keyword_index].rstrip()
+    return any(compact_prefix.endswith(prefix) for prefix in NEGATION_PREFIXES)
+
+
 def _present_note(key: str, text: str) -> str:
     preview = text[:TEXT_PREVIEW_LENGTH]
     suffix = "..." if len(text) > TEXT_PREVIEW_LENGTH else ""
@@ -378,7 +405,7 @@ def _commit_examples(outcome: str) -> list[str]:
 
 def _infer_commit_type(outcome: str) -> str:
     lowered_text = outcome.lower()
-    if "测试" in outcome or "pytest" in lowered_text or "unittest" in lowered_text:
+    if _mentions_test_task(outcome):
         return "test"
     if "文档" in outcome or "报告" in outcome or "readme" in lowered_text:
         return "docs"
@@ -392,7 +419,7 @@ def _infer_commit_type(outcome: str) -> str:
 def _infer_commit_scope(outcome: str) -> str:
     if "api" in outcome.lower() or "接口" in outcome:
         return "api"
-    if "测试" in outcome or "pytest" in outcome.lower():
+    if _mentions_test_task(outcome):
         return "tests"
     if "文档" in outcome or "报告" in outcome:
         return "docs"
@@ -469,7 +496,7 @@ def _branch_prefix(outcome: str) -> str:
 
 def _branch_slug(outcome: str) -> str:
     lowered_text = outcome.lower()
-    if "测试" in outcome or "pytest" in lowered_text or "unittest" in lowered_text:
+    if _mentions_test_task(outcome):
         return "add-tests"
     if "api" in lowered_text or "接口" in outcome:
         return "api-task"
