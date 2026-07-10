@@ -429,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
+    parser.add_argument("description", nargs="?", help="配合 --generate 使用的一句话任务描述。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
@@ -442,6 +443,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
+    parser.add_argument("--branch", help="配合 --generate 简写指定目标分支名。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
     parser.add_argument("--verification", help="Verification Surface（验证方式）。")
     parser.add_argument("--constraints", help="Constraints（约束）。")
@@ -928,6 +930,9 @@ def _risk_level(score: int) -> str:
 
 def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
     field_values = _goal_values_from_json(args.from_json)
+    description = getattr(args, "description", None)
+    if isinstance(description, str) and description.strip() and not field_values:
+        field_values.update(_goal_defaults_from_description(description.strip(), getattr(args, "branch", None)))
     for key in ELEMENT_ORDER:
         value = getattr(args, key)
         if isinstance(value, str) and value.strip():
@@ -940,6 +945,16 @@ def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
         iteration=_required_field_value(field_values, "iteration"),
         blocked=_required_field_value(field_values, "blocked"),
     )
+
+
+def _goal_defaults_from_description(description: str, branch: object) -> dict[str, str]:
+    values = dict(INTERACTIVE_DEFAULTS)
+    branch_text = branch.strip() if isinstance(branch, str) else ""
+    if branch_text:
+        values["outcome"] = f"在分支 `{branch_text}` 上完成用户描述的编码任务：{description}"
+    else:
+        values["outcome"] = f"完成用户描述的编码任务：{description}"
+    return values
 
 
 def _goal_values_from_json(json_path: str | None) -> dict[str, str]:
