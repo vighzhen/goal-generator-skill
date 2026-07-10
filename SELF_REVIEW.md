@@ -427,7 +427,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量补充回答合并 | 第 12 轮可以为多个任务生成缺失信息追问文案，但需求方按任务名回答后，用户仍需手工把补充内容拆成 6 要素并回填 JSON/CSV 清单；单任务 `--merge-context` 无法直接处理批量文件。 | 在 `scripts/batch_generate.py` 新增 `--merge-supplements <path>` 模式，读取原批量任务清单和按任务名组织的补充回答 JSON/CSV，把补充文本、显式字段和已有 description/fields 合并为新的任务 JSON，并输出任务级字段来源、仍缺要素和 `--check` 质量门禁；同步更新 README 与 SKILL。 | 待实现 | - |
+| 1 | 批量补充回答合并 | 第 12 轮可以为多个任务生成缺失信息追问文案，但需求方按任务名回答后，用户仍需手工把补充内容拆成 6 要素并回填 JSON/CSV 清单；单任务 `--merge-context` 无法直接处理批量文件。 | 在 `scripts/batch_generate.py` 新增 `--merge-supplements <path>` 模式，读取原批量任务清单和按任务名组织的补充回答 JSON/CSV，把补充文本、显式字段和已有 description/fields 合并为新的任务 JSON，并输出任务级字段来源、仍缺要素和 `--check` 质量门禁；同步更新 README 与 SKILL。 | 已实现 | 7fc61f7 |
 
 #### 去重审查
 
@@ -444,6 +444,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量补充回答合并 | 批量任务文件运行 `--questions` 后，需求方按任务名给出路径、验证命令、约束、提交策略等补充，需要快速生成新的可审计任务清单。 | 手工复制每条回答、拆字段、改 JSON/CSV，再跑 dry-run/lint 检查，容易填错任务名或漏掉某个要素。 | 一条命令把回答文件合并回批量任务 JSON，报告每个字段来源和剩余缺口，可用 `--check` 阻止仍缺要素的清单进入生成阶段。 | 不是同一结果换输出格式，而是新增“批量追问回答 → 字段回写 → 继续质量门禁/生成”的主流程能力。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（系统 Python 缓存权限限制后使用已授权提权重跑通过）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py /tmp/batch_merge_round13_tasks.json --merge-supplements /tmp/batch_merge_round13_supplements.json --output-file /tmp/batch_merge_round13_merged.json --report-json /tmp/batch_merge_round13_report.json`、合并结果继续 `--lint-fields` 通过、`--merge-supplements --check` 对缺失要素和未知任务名失败退出码断言、CSV 补充回答合并断言、`python3 scripts/batch_generate.py --help | grep -n "merge-supplements"`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -452,7 +456,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 12 轮，第 13 轮审查清单已创建且待实现能力增强；累计修复 2 个问题，新增 12 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 13 轮，准备进入第 14 轮；累计修复 2 个问题，新增 13 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -467,4 +471,5 @@
 - 第 10 轮：批量依赖顺序生成（a2df9f1）
 - 第 11 轮：`/goal` 目录语义质量门禁（0413a53）
 - 第 12 轮：批量缺失信息追问文案（feb36ed）
-剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案依赖同一套启发式要素识别，不能替代人工判断任务真实意图；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
+- 第 13 轮：批量补充回答合并（7fc61f7）
+剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
