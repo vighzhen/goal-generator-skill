@@ -556,6 +556,38 @@
 
 修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "enrich-from-paths"`、有效 JSON `--enrich-from-paths --output-file --report-json`、增强后 JSON `--lint-fields` 语义复核通过、无效路径 `--enrich-from-paths --report-json` 失败退出码验证、CSV `path` 列 `--enrich-from-paths --summary-only --report-json`、`--filter`/`--limit`/`--sort-by`/`--dedupe` 组合回填、`--check --summary-only --report-json` 门禁验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
+
+## 第 17 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 17 轮要求重新读取全部 7 个范围内文件，复核第 16 轮 `--enrich-from-paths`、第 11 轮目录级 `/goal` 质量门禁与批量生成交付流程；暂未发现新的 P0/P1 缺陷，本轮聚焦补齐嵌套目录交付物递归检查能力。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `/goal` 递归目录语义质量门禁 | 第 11 轮 `--lint-goal-dir` 只扫描目录直属 `.txt` 文件；团队按模块、依赖波次或任务来源拆分输出时，`/goal` 文件常位于多级子目录，当前需要用户手写 find/xargs 或多次运行单目录检查，容易漏检嵌套交付物。 | 在 `scripts/generate_goal.py` 新增 `--lint-goal-tree <目录>`，递归扫描目录树内 `.txt` `/goal` 文件，跳过 `.git`、缓存、依赖和构建产物目录，按相对路径稳定排序并复用 `lint_goal_text` 输出文件级结构与语义质量报告；任一文件不合格或树内无目标文件时返回退出码 1，并同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| `/goal` 递归目录语义质量门禁 | `scripts/generate_goal.py --lint-goal-dir` | `--lint-goal-dir` 明确只检查目录直属 `.txt` 文件；新功能递归遍历嵌套交付目录并稳定报告相对路径，覆盖按模块/波次分层存放的批量产物。 | 通过 |
+| `/goal` 递归目录语义质量门禁 | `scripts/generate_goal.py --lint-goal-file` | 单文件 lint 不能发现目录树中遗漏或失败的多个文件；新功能聚合整棵目录树的最终交付质量，并用统一退出码做 CI 门禁。 | 通过 |
+| `/goal` 递归目录语义质量门禁 | `scripts/batch_generate.py --lint-output` | `--lint-output` 只检查本次批量生成的内存输出；新功能检查已经落盘、可能由多次生成或人工整理出的嵌套目录交付物。 | 通过 |
+| `/goal` 递归目录语义质量门禁 | `--report-json` / 输出目录能力 | 报告和输出目录只是承载形式；新功能新增递归发现、忽略目录、质量门禁和失败退出行为，不是同一数据的展示变体。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| `/goal` 递归目录语义质量门禁 | 多轮批量生成、按模块/任务来源分层归档或 CI 收集 artifact 后，需要确认整个目录树下所有最终 `/goal` 文本都结构完整且语义可执行。 | 手写 shell 递归查找 `.txt` 并逐个调用 `--lint-goal-file`，或对每个子目录分别运行 `--lint-goal-dir`，容易漏掉深层文件、缓存目录或失败退出码。 | 一条命令完成递归发现、忽略无关目录、逐文件语义质量检查和聚合失败退出，报告中保留稳定相对路径，适合嵌套交付目录的 CI 门禁。 | 从“单层目录检查”扩展到“交付目录树检查”，新增递归文件发现和忽略规则，覆盖现有目录能力无法触达的真实落盘结构。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -564,7 +596,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 16 轮，下一轮将进入第 17 轮审查；累计修复 3 个问题，新增 16 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 17 轮审查清单已建立，正在实现递归目录语义质量门禁；累计修复 3 个问题，新增 16 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
