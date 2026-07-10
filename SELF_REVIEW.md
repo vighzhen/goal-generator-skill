@@ -308,12 +308,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务示例清单 | 新用户看到能力很多但不知道从哪个命令开始，README 需要人工翻找，自动化调用也缺少机器可读示例。 | 在 generate_goal.py 新增 --examples，输出常见单任务和批量命令示例 JSON，并纳入 --capabilities。 | 已实现 | 待提交 |
-| 2 | 批量 Markdown 报告 | 团队评审或 PR 附件常希望直接阅读 Markdown 报告，当前 JSON 报告适合机器但不适合人工审阅。 | 在 batch_generate.py 新增 --report-md <path>，写出成功任务、缺失项、默认填充、输出路径和跳过原因 Markdown 表格。 | 已实现 | 待提交 |
+| 1 | 单任务示例清单 | 新用户看到能力很多但不知道从哪个命令开始，README 需要人工翻找，自动化调用也缺少机器可读示例。 | 在 generate_goal.py 新增 --examples，输出常见单任务和批量命令示例 JSON，并纳入 --capabilities。 | 已实现 | 25f06da |
+| 2 | 批量 Markdown 报告 | 团队评审或 PR 附件常希望直接阅读 Markdown 报告，当前 JSON 报告适合机器但不适合人工审阅。 | 在 batch_generate.py 新增 --report-md <path>，写出成功任务、缺失项、默认填充、输出路径和跳过原因 Markdown 表格。 | 已实现 | 17273c3 |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
