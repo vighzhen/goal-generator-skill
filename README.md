@@ -113,6 +113,16 @@ python3 scripts/generate_goal.py --suggest-fields "给项目加单元测试"
 
 该功能适合 IDE、表单或团队自动化先生成字段草稿，再让人工补齐后交给 `--generate --from-json`。
 
+### 生成 Goal JSON 草稿
+
+使用 `--goal-json` 可一次输出面向 IDE、机器人或流水线的机器可读草稿，包含 6 要素字段、字段来源、`review_required`、`ready_to_generate`、字段校验结果和推荐下一步命令：
+
+```bash
+python3 scripts/generate_goal.py --goal-json "给项目加单元测试"
+```
+
+该功能适合把一句话需求接入表单或自动化流程：如果 `review_required` 非空，先人工复核这些字段；复核后保存为 `goal_fields.json`，再执行 `--validate-fields-json` 和 `--generate --from-json`。
+
 ### 校验 6 要素字段 JSON
 
 使用 `--validate-fields-json` 可在执行 `--generate --from-json` 前检查 JSON 是否包含完整且非空的 6 要素字段、是否存在未知字段，以及是否能正常渲染成 `/goal`：
@@ -405,6 +415,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 单任务 Markdown 评审卡片
 - 单任务机器可读追问包 JSON
 - 单任务可编辑 6 要素字段建议 JSON
+- 单任务 Goal JSON 草稿（含复核状态、校验结果和下一步命令）
 - 单任务 6 要素字段 JSON 质量校验
 - 批量可编辑 6 要素字段 JSON 草稿导出
 - 批量 `/goal` 可执行度评分摘要

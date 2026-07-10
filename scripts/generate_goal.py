@@ -375,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.output_file,
             )
             return 0
+        if args.goal_json:
+            _emit_output(json.dumps(build_goal_json_draft(args.goal_json), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.risk_card:
             _emit_output(format_risk_card(args.risk_card), args.output_file)
             return 0
@@ -428,6 +431,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
+    parser.add_argument("--goal-json", help="生成面向 IDE、机器人或流水线的 Goal JSON 草稿，包含 6 要素、复核状态、校验结果和下一步命令。")
     parser.add_argument("--risk-card", help="生成单任务 Markdown 风险卡片，汇总风险因素、复杂度和缓解建议。")
     parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
@@ -482,6 +486,7 @@ def build_capabilities() -> dict[str, object]:
                 "--profile",
                 "--score",
                 "--compare",
+                "--goal-json",
                 "--risk-card",
                 "--review-card",
                 "--questions-json",
@@ -568,6 +573,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "对比两个任务描述",
                 "scenario": "同时拿到两个候选任务时，判断哪个更可直接生成 /goal、哪个更需要补信息。",
                 "command": "python3 scripts/generate_goal.py --compare '给项目加单元测试' '为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q'",
+            },
+            {
+                "name": "生成 Goal JSON 草稿",
+                "scenario": "IDE、机器人或流水线需要一次拿到可编辑 6 要素、人工复核状态、校验结果和下一步命令。",
+                "command": "python3 scripts/generate_goal.py --goal-json '给项目加单元测试'",
             },
             {
                 "name": "生成 Markdown 评审卡片",
@@ -985,6 +995,83 @@ def compare_descriptions(description_a: str, description_b: str) -> dict[str, ob
         "missing_only_in_a": _missing_difference(score_a, score_b),
         "missing_only_in_b": _missing_difference(score_b, score_a),
         "recommendation": _comparison_recommendation(comparison, score_a, score_b),
+    }
+
+
+def build_goal_json_draft(
+    description: str,
+    field_overrides: dict[str, str] | None = None,
+    override_source: str = "input_fields",
+) -> dict[str, object]:
+    """生成面向 IDE、机器人或流水线的机器可读 /goal 草稿。"""
+    if not description.strip():
+        raise ValueError("--goal-json 不能为空，请提供任务描述")
+    suggestion = suggest_goal_fields(description)
+    fields = _ordered_field_mapping(suggestion.get("fields", {}))
+    sources = _ordered_source_mapping(suggestion.get("sources", {}))
+    if field_overrides:
+        _apply_field_overrides(fields, sources, field_overrides, override_source)
+    validation = validate_fields_json_data({"fields": fields}, "goal-json-draft")
+    review_required = _review_required_keys(sources)
+    score = score_description(description)
+    profile = build_task_profile(description)
+    return {
+        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
+        "ready_to_generate": bool(validation.get("valid")) and not review_required,
+        "review_required": review_required,
+        "fields": fields,
+        "sources": sources,
+        "validation": validation,
+        "missing": suggestion.get("missing", []),
+        "present": suggestion.get("present", {}),
+        "task_type": profile.get("task_type", {}),
+        "readiness_score": score.get("readiness_score", 0),
+        "readiness_level": score.get("readiness_level", "unknown"),
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": profile.get("risk_score", 0),
+        "recommended_commands": _goal_json_recommended_commands(review_required),
+        "note": "review_required 中的字段来自推荐方向，执行 --generate --from-json 前请按真实项目情况复核。",
+    }
+
+
+def _ordered_field_mapping(value: object) -> dict[str, str]:
+    values = value if isinstance(value, dict) else {}
+    return {key: str(values.get(key, "")).strip() for key in ELEMENT_ORDER}
+
+
+def _ordered_source_mapping(value: object) -> dict[str, str]:
+    values = value if isinstance(value, dict) else {}
+    return {key: str(values.get(key, "unknown")) for key in ELEMENT_ORDER}
+
+
+def _apply_field_overrides(
+    fields: dict[str, str],
+    sources: dict[str, str],
+    overrides: dict[str, str],
+    override_source: str,
+) -> None:
+    for key in ELEMENT_ORDER:
+        value = overrides.get(key)
+        if value is None or not str(value).strip():
+            continue
+        fields[key] = str(value).strip()
+        sources[key] = override_source
+
+
+def _review_required_keys(sources: dict[str, str]) -> list[str]:
+    return [key for key in ELEMENT_ORDER if sources.get(key) == "recommended_direction"]
+
+
+def _goal_json_recommended_commands(review_required: list[str]) -> dict[str, str]:
+    if review_required:
+        return {
+            "review": "人工复核 review_required 字段后保存为 goal_fields.json",
+            "validate": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
+            "generate": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
+        }
+    return {
+        "validate": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
+        "generate": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
     }
 
 
