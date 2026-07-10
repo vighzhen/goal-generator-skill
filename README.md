@@ -244,6 +244,12 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
 # 按任务生成可直接发送给需求方的缺失要素追问文案
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --questions --output-file batch_questions.txt
 
+# 将按任务名收集到的补充回答合并回批量任务 fields，并输出新的任务 JSON
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --merge-supplements batch_answers.json --output-file merged_tasks.json --report-json merge_report.json
+
+# 补充回答合并质量门禁：仍缺要素、输入错误或未匹配任务名时返回非零退出码
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --merge-supplements batch_answers.csv --check
+
 # 严格模式：缺失 6 要素的任务会跳过，不使用默认填充
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --strict
 
@@ -310,10 +316,38 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
 - `--questions` 不生成 `/goal` 正文，而是按任务名汇总缺失要素并生成可直接发送的追问文案；可配合 `--output-file` 保存文案，配合 `--report-json` 保存任务级缺失结构。
+- `--merge-supplements <path>` 不生成 `/goal` 正文，而是读取按任务名组织的补充回答 JSON/CSV，把补充文本、显式 6 要素字段和原任务的 `description`/`fields` 合并为新的任务 JSON；可配合 `--output-file` 保存合并清单，配合 `--report-json` 查看字段来源、未匹配补充和剩余缺口，配合 `--check` 在仍缺要素、输入错误或补充任务名未匹配时失败退出。
 - `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。
 - `--redaction-check` 不生成 `/goal` 正文，而是逐个任务审计名称、描述和 6 要素字段值中的 token、密钥、邮箱、URL 等敏感片段；发现风险时退出码为 1，并在报告中提供脱敏预览。
 - `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
 - `--dependency-order` 会在生成、dry-run、list、lint 或 redaction 前应用依赖拓扑顺序；如果筛选/limit 后导致依赖缺失、循环或重复任务名，会直接失败并提示先运行 `--plan-dependencies` 查看详情。
+
+### 批量合并补充回答
+
+`--merge-supplements` 用于承接 `--questions` 之后的需求方回答。补充文件可以是 JSON 对象映射、JSON 数组或 CSV。最简 JSON 对象映射中，键必须与任务清单的 `name` 完全一致，值可以是一段自然语言回答：
+
+```json
+{
+  "补测试": "outcome: 为 src/services/payment.py 新增 12 个 pytest 用例；verification: 运行 python3 -m pytest tests/services/test_payment.py -q；constraints: 不改业务逻辑、不引入新依赖；boundaries: 仅处理 src/services/payment.py 和 tests/services/test_payment.py；iteration: 每个行为路径一组测试，验证后单独 commit；blocked: 无法推断断言时停下问人"
+}
+```
+
+也可以使用对象数组，把显式字段放入 `fields`，把自然语言回答放入 `supplement` / `answer` / `response` / `text`：
+
+```json
+[
+  {
+    "name": "补测试",
+    "supplement": "只测 src/services/payment.py，对应测试放在 tests/services/test_payment.py，每个行为路径单独 commit。",
+    "fields": {
+      "verification": "每次新增测试后运行 python3 -m pytest tests/services/test_payment.py -q，最终运行 python3 -m pytest tests/services -q",
+      "blocked": "无法从现有代码推断业务预期或断言时停下问人；允许跳过项不超过 10%"
+    }
+  }
+]
+```
+
+CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`response`、`text`、`description` 以及 6 要素字段列。合并时，原任务的 `fields` 作为基线，补充回答中的显式标签和字段会覆盖对应要素；自然语言回答会用于推断仍缺的要素。输出 JSON 保留 `name`、`description`、`depends_on` 和合并后的 `fields`，可继续交给 `--lint-fields`、`--check` 或批量生成命令。
 
 ## 6 个必要要素
 
@@ -347,6 +381,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `/goal` 输出目录结构与语义质量门禁
 - 一键生成可复制的缺失要素追问文案
 - 批量任务缺失要素追问文案
+- 批量追问回答合并回任务清单
 - 原始需求与补充回答合并为 6 要素字段草稿
 - 单任务 6 要素字段语义质量检查和生成前门禁
 - 单任务输出写入文件

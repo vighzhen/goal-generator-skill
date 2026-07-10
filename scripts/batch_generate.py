@@ -41,6 +41,7 @@ FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "iteration": ("迭代", "每个", "每次", "逐个", "commit", "提交", "预期"),
     "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少"),
 }
+SUPPLEMENT_TEXT_FIELDS: tuple[str, ...] = ("supplement", "answer", "response", "text", "description")
 
 
 
@@ -51,6 +52,13 @@ class TaskSpec:
     fields: dict[str, str]
     depends_on: list[str] = field(default_factory=list)
     load_error: str = ""
+
+
+@dataclass(frozen=True)
+class SupplementEntry:
+    task_name: str
+    text: str
+    fields: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -109,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.merge_supplements:
+        try:
+            return _run_merge_supplements_mode(tasks, args, start_time)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"读取输入失败：{error}", file=sys.stderr)
+            return 1
     if args.questions:
         return _run_batch_questions_mode(tasks, args, start_time)
     if args.redaction_check:
@@ -167,6 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
     parser.add_argument("--questions", action="store_true", help="按任务生成可直接发送的批量缺失要素追问文案。")
+    parser.add_argument("--merge-supplements", help="读取按任务名组织的补充回答 JSON/CSV，合并回批量任务 fields 并输出新的任务 JSON。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -295,6 +310,329 @@ def _run_batch_questions_mode(tasks: list[TaskSpec], args: argparse.Namespace, s
     if fail_on_skipped and (question_report["needs_input_count"] or skipped_tasks):
         return 1
     return 0
+
+
+def _run_merge_supplements_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--merge-supplements 不支持 --output-dir，请使用 --output-file 写入合并后的 JSON。", file=sys.stderr)
+        return 1
+    supplements = _load_supplements(Path(args.merge_supplements))
+    merge_report = _build_supplement_merge_report(tasks, supplements)
+    merged_json = json.dumps(merge_report["merged_tasks"], ensure_ascii=False, indent=2)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(merged_json, Path(args.output_file))
+    elif not summary_only:
+        print(merged_json)
+    elapsed_seconds = time.perf_counter() - start_time
+    if args.report_json:
+        _write_supplement_merge_report(merge_report, elapsed_seconds, Path(args.report_json))
+    print(_format_supplement_merge_summary(merge_report, elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and not merge_report["valid"]:
+        return 1
+    return 0
+
+
+def _load_supplements(supplements_path: Path) -> list[SupplementEntry]:
+    suffix = supplements_path.suffix.lower()
+    if suffix == ".json":
+        return _supplements_from_json_data(json.loads(supplements_path.read_text(encoding="utf-8")))
+    if suffix == ".csv":
+        return _load_csv_supplements(supplements_path)
+    supported = "、".join(SUPPORTED_SUFFIXES)
+    raise ValueError(f"--merge-supplements 不支持的补充文件格式：{suffix}，仅支持 {supported}")
+
+
+def _supplements_from_json_data(data: Any) -> list[SupplementEntry]:
+    if isinstance(data, dict):
+        entries: list[SupplementEntry] = []
+        for task_name, raw_value in data.items():
+            entries.extend(_supplement_entries_from_value(_string_value(task_name), raw_value))
+        return entries
+    if isinstance(data, list):
+        return [_supplement_entry_from_json_item(item, index) for index, item in enumerate(data, start=1)]
+    raise ValueError("JSON 补充回答必须是任务名到回答的对象映射，或包含 name/supplement/fields 的对象数组")
+
+
+def _supplement_entries_from_value(task_name: str, raw_value: Any) -> list[SupplementEntry]:
+    if not task_name:
+        raise ValueError("补充回答映射中存在空任务名")
+    if isinstance(raw_value, list):
+        return [_supplement_entry_from_value(task_name, item) for item in raw_value]
+    return [_supplement_entry_from_value(task_name, raw_value)]
+
+
+def _supplement_entry_from_json_item(item: Any, index: int) -> SupplementEntry:
+    if not isinstance(item, dict):
+        raise ValueError(f"第 {index} 个 JSON 补充回答必须是对象")
+    task_name = _string_value(item.get("name") or item.get("task_name") or item.get("task"))
+    if not task_name:
+        raise ValueError(f"第 {index} 个 JSON 补充回答缺少 name/task_name/task")
+    return _supplement_entry_from_mapping(task_name, item)
+
+
+def _supplement_entry_from_value(task_name: str, raw_value: Any) -> SupplementEntry:
+    if isinstance(raw_value, dict):
+        return _supplement_entry_from_mapping(task_name, raw_value)
+    return SupplementEntry(task_name=task_name, text=_string_value(raw_value), fields={})
+
+
+def _supplement_entry_from_mapping(task_name: str, item: dict[str, Any]) -> SupplementEntry:
+    nested_fields = _fields_from_mapping(item.get("fields"))
+    direct_fields = _fields_from_mapping(item)
+    nested_fields.update(direct_fields)
+    return SupplementEntry(
+        task_name=task_name,
+        text=_supplement_text_from_mapping(item),
+        fields=nested_fields,
+    )
+
+
+def _supplement_text_from_mapping(item: dict[str, Any]) -> str:
+    parts: list[str] = []
+    seen_parts: set[str] = set()
+    for field_name in SUPPLEMENT_TEXT_FIELDS:
+        value = _string_value(item.get(field_name))
+        if not value or value in seen_parts:
+            continue
+        parts.append(value)
+        seen_parts.add(value)
+    return "\n".join(parts)
+
+
+def _load_csv_supplements(supplements_path: Path) -> list[SupplementEntry]:
+    with supplements_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if not reader.fieldnames:
+            raise ValueError("CSV 补充文件缺少表头")
+        return [_supplement_entry_from_csv_row(row, index) for index, row in enumerate(reader, start=1)]
+
+
+def _supplement_entry_from_csv_row(row: dict[str, str | None], index: int) -> SupplementEntry:
+    task_name = _string_value(row.get("name") or row.get("task_name") or row.get("task"))
+    if not task_name:
+        raise ValueError(f"第 {index} 行 CSV 补充回答缺少 name/task_name/task")
+    return SupplementEntry(
+        task_name=task_name,
+        text=_supplement_text_from_mapping(row),
+        fields=_fields_from_mapping(row),
+    )
+
+
+def _build_supplement_merge_report(tasks: list[TaskSpec], supplements: list[SupplementEntry]) -> dict[str, object]:
+    supplements_by_name = _supplements_by_task_name(supplements)
+    known_names = {task.name for task in tasks}
+    task_results = [_merge_task_supplements(task, supplements_by_name.get(task.name, [])) for task in tasks]
+    task_reports = [result["report"] for result in task_results]
+    merged_tasks = [result["task"] for result in task_results]
+    unknown_supplements = _unknown_supplement_reports(supplements, known_names)
+    ready_count = sum(1 for report in task_reports if report["ready_to_generate"])
+    needs_input_count = sum(1 for report in task_reports if report["missing_fields"])
+    input_error_count = sum(1 for report in task_reports if report["input_error"])
+    applied_task_count = sum(1 for report in task_reports if report["applied_supplement_count"])
+    return {
+        "valid": ready_count == len(task_reports) and not unknown_supplements,
+        "task_count": len(task_reports),
+        "ready_count": ready_count,
+        "needs_input_count": needs_input_count,
+        "input_error_count": input_error_count,
+        "supplement_count": len(supplements),
+        "applied_task_count": applied_task_count,
+        "unknown_supplement_count": len(unknown_supplements),
+        "unknown_supplements": unknown_supplements,
+        "tasks": task_reports,
+        "merged_tasks": merged_tasks,
+    }
+
+
+def _supplements_by_task_name(supplements: list[SupplementEntry]) -> dict[str, list[SupplementEntry]]:
+    grouped: dict[str, list[SupplementEntry]] = {}
+    for supplement in supplements:
+        grouped.setdefault(supplement.task_name, []).append(supplement)
+    return grouped
+
+
+def _unknown_supplement_reports(supplements: list[SupplementEntry], known_names: set[str]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": supplement.task_name,
+            "text_preview": _normalize_description(supplement.text)[:160],
+            "fields": sorted(supplement.fields),
+            "suggestion": "确认任务名是否与输入清单的 name 完全一致，或把该补充回答移除。",
+        }
+        for supplement in supplements
+        if supplement.task_name not in known_names
+    ]
+
+
+def _merge_task_supplements(task: TaskSpec, supplements: list[SupplementEntry]) -> dict[str, object]:
+    merged_description = _merged_task_description(task, supplements)
+    field_values, field_sources = _base_merge_field_values(task, merged_description)
+    combined_text = _merge_combined_text(merged_description, supplements)
+    _apply_supplement_label_fields(field_values, field_sources, supplements)
+    _merge_supplement_inferred_fields(field_values, field_sources, combined_text)
+    _apply_supplement_direct_fields(field_values, field_sources, supplements)
+    missing_fields = _missing_keys(field_values)
+    input_error = _merge_input_error(task, merged_description)
+    ready_to_generate = not input_error and not missing_fields
+    return {
+        "task": _merged_task_json(task, merged_description, field_values),
+        "report": {
+            "name": task.name,
+            "ready_to_generate": ready_to_generate,
+            "input_error": input_error,
+            "applied_supplement_count": len(supplements),
+            "present_fields": [key for key in ELEMENT_ORDER if key not in missing_fields],
+            "missing_fields": missing_fields,
+            "field_sources": field_sources,
+            "summary": _supplement_merge_task_summary(input_error, missing_fields, len(supplements)),
+        },
+    }
+
+
+def _merged_task_description(task: TaskSpec, supplements: list[SupplementEntry]) -> str:
+    if task.description:
+        return task.description
+    for supplement in supplements:
+        if supplement.text:
+            return _normalize_description(supplement.text)
+    return ""
+
+
+def _base_merge_field_values(task: TaskSpec, merged_description: str) -> tuple[dict[str, str], dict[str, str]]:
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {key: "missing" for key in ELEMENT_ORDER}
+    if merged_description:
+        analysis = analyze_description(merged_description)
+        description_fields = _extract_labeled_fields(merged_description)
+        for key, value in description_fields.items():
+            values[key] = value
+            sources[key] = "description_label" if task.description else "supplement_description_label"
+        source = "description_inferred" if task.description else "supplement_description_inferred"
+        _merge_present_fields_with_source(values, sources, merged_description, list(analysis["present"].keys()), source)
+    for key, value in task.fields.items():
+        if value:
+            values[key] = value
+            sources[key] = "task_fields"
+    return values, sources
+
+
+def _merge_present_fields_with_source(
+    values: dict[str, str],
+    sources: dict[str, str],
+    description: str,
+    present_keys: list[str],
+    source: str,
+) -> None:
+    for key in present_keys:
+        if key in values:
+            continue
+        values[key] = _description_fallback(key, description)
+        sources[key] = source
+
+
+def _merge_combined_text(merged_description: str, supplements: list[SupplementEntry]) -> str:
+    parts = [merged_description, *(supplement.text for supplement in supplements)]
+    return "\n".join(part for part in parts if part)
+
+
+def _apply_supplement_label_fields(
+    field_values: dict[str, str],
+    field_sources: dict[str, str],
+    supplements: list[SupplementEntry],
+) -> None:
+    for supplement in supplements:
+        for key, value in _extract_labeled_fields(supplement.text).items():
+            if value:
+                field_values[key] = value
+                field_sources[key] = "supplement_label"
+
+
+def _merge_supplement_inferred_fields(
+    field_values: dict[str, str],
+    field_sources: dict[str, str],
+    combined_text: str,
+) -> None:
+    if not combined_text.strip():
+        return
+    analysis = analyze_description(combined_text)
+    _merge_present_fields_with_source(
+        field_values,
+        field_sources,
+        combined_text,
+        list(analysis["present"].keys()),
+        "supplement_inferred",
+    )
+
+
+def _apply_supplement_direct_fields(
+    field_values: dict[str, str],
+    field_sources: dict[str, str],
+    supplements: list[SupplementEntry],
+) -> None:
+    for supplement in supplements:
+        for key, value in supplement.fields.items():
+            if value:
+                field_values[key] = value
+                field_sources[key] = "supplement_fields"
+
+
+def _merge_input_error(task: TaskSpec, merged_description: str) -> str:
+    if task.load_error:
+        return task.load_error
+    if not merged_description:
+        return "缺少 description"
+    return ""
+
+
+def _merged_task_json(task: TaskSpec, merged_description: str, field_values: dict[str, str]) -> dict[str, object]:
+    item: dict[str, object] = {"name": task.name, "description": merged_description}
+    if task.depends_on:
+        item["depends_on"] = task.depends_on
+    fields = {key: field_values[key] for key in ELEMENT_ORDER if field_values.get(key)}
+    if fields:
+        item["fields"] = fields
+    return item
+
+
+def _supplement_merge_task_summary(input_error: str, missing_fields: list[str], applied_count: int) -> str:
+    if input_error:
+        return f"任务输入需修复：{input_error}"
+    prefix = f"已应用 {applied_count} 条补充回答；" if applied_count else "未匹配到补充回答；"
+    if not missing_fields:
+        return f"{prefix}6 要素已具备，可继续生成。"
+    return f"{prefix}仍需补充 {len(missing_fields)} 个要素：{_format_labels(missing_fields)}。"
+
+
+def _write_supplement_merge_report(
+    merge_report: dict[str, object],
+    elapsed_seconds: float,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    unready_count = int(merge_report["task_count"]) - int(merge_report["ready_count"])
+    report = {
+        "success_count": merge_report["ready_count"],
+        "skipped_count": unready_count + int(merge_report["unknown_supplement_count"]),
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "supplement_merge": merge_report,
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_supplement_merge_summary(merge_report: dict[str, object], elapsed_seconds: float) -> str:
+    return (
+        "补充合并完成："
+        f"任务 {merge_report.get('task_count', 0)} 个，"
+        f"可生成 {merge_report.get('ready_count', 0)} 个，"
+        f"仍需补充 {merge_report.get('needs_input_count', 0)} 个，"
+        f"输入错误 {merge_report.get('input_error_count', 0)} 个，"
+        f"已应用补充 {merge_report.get('applied_task_count', 0)} 个任务/"
+        f"{merge_report.get('supplement_count', 0)} 条，"
+        f"未匹配补充 {merge_report.get('unknown_supplement_count', 0)} 条，"
+        f"总耗时 {elapsed_seconds:.2f} 秒。"
+    )
 
 
 def _build_batch_question_report(tasks: list[TaskSpec]) -> dict[str, object]:
