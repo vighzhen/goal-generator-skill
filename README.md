@@ -112,6 +112,12 @@ python3 scripts/generate_goal.py --generate \
 python3 scripts/generate_goal.py --generate --from-json goal_fields.json
 ```
 
+如果只有一句话需求、但想先得到可编辑草稿，可以使用 `--draft` 自动填充缺失要素并明确标注默认填充项：
+
+```bash
+python3 scripts/generate_goal.py --draft "给项目加单元测试"
+```
+
 ### 校验已有 /goal 文件
 
 如果 `/goal` 指令经过手工编辑、复制或批量拼接，可以用 `--validate-goal-file` 检查分隔线、5 段结构和 6 要素提示是否完整：
@@ -281,6 +287,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 机器可读能力清单输出
 - 机器可读命令示例清单
 - 已有 `/goal` 文件结构校验
+- 单任务一句话草稿生成
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`

@@ -357,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
             validation = validate_goal_file(args.validate_goal_file)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
+        if args.draft:
+            _emit_output(format_draft_goal(args.draft), args.output_file)
+            return 0
         if args.generate:
             _emit_output(render_goal_text(_goal_from_args(args)), args.output_file)
             return 0
@@ -380,6 +383,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
+    parser.add_argument("--draft", help="从一句话描述生成可编辑 /goal 草稿，缺失要素使用默认值并标注。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
@@ -422,6 +426,7 @@ def build_capabilities() -> dict[str, object]:
                 "--capabilities",
                 "--examples",
                 "--validate-goal-file",
+                "--draft",
                 "--generate",
                 "--interactive",
                 "--from-json",
@@ -480,6 +485,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "从 JSON 生成 /goal",
                 "scenario": "自动化系统已保存 6 要素，希望避免展开多个 CLI 参数。",
                 "command": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
+            },
+            {
+                "name": "生成可编辑草稿",
+                "scenario": "只有一句话需求时，先生成带默认填充提示的 /goal 草稿供人工复核。",
+                "command": "python3 scripts/generate_goal.py --draft '给项目加单元测试'",
             },
             {
                 "name": "校验已有 /goal 文件",
@@ -619,6 +629,22 @@ def format_question_prompt(description: str) -> str:
     for index, key in enumerate(analysis["missing"], start=1):
         lines.append(f"{index}. {ELEMENT_LABELS[key]}：{QUESTION_EXAMPLES[key]}")
     lines.extend(["", "你可以直接简短回答，我会帮你补全成完整指令。"])
+    return "\n".join(lines)
+
+
+def format_draft_goal(description: str) -> str:
+    """从一句话描述生成带默认填充提示的 /goal 草稿。"""
+    if not description.strip():
+        raise ValueError("--draft 不能为空，请提供任务描述")
+    field_values = _extract_labeled_fields(description)
+    analysis = analyze_description(description)
+    _merge_present_fallbacks(field_values, description, analysis)
+    defaulted_keys = _apply_interactive_defaults(field_values)
+    lines: list[str] = []
+    if defaulted_keys:
+        labels = "、".join(ELEMENT_LABELS[key] for key in defaulted_keys)
+        lines.append(f"默认填充：{labels}。请在执行前按实际项目情况复核这些字段。")
+    lines.append(render_goal_text(_fields_from_mapping(field_values)))
     return "\n".join(lines)
 
 
