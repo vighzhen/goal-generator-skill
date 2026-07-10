@@ -1051,7 +1051,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量任务路径存在门禁 | 第 30 轮 `--require-task-path` 只要求清单填写路径字段，不验证路径是否真实存在；团队在生成前还需要确保路径锚点可被当前仓库读取，否则执行者拿到 `/goal` 后才发现路径拼错或已移动。当前只能先跑 `--inspect-paths` 或外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--require-existing-task-path`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；任务缺少路径或路径不存在时跳过并返回失败退出码，报告保留原因和建议。同步更新 README 与 SKILL。 | 待实现 | - |
+| 1 | 批量任务路径存在门禁 | 第 30 轮 `--require-task-path` 只要求清单填写路径字段，不验证路径是否真实存在；团队在生成前还需要确保路径锚点可被当前仓库读取，否则执行者拿到 `/goal` 后才发现路径拼错或已移动。当前只能先跑 `--inspect-paths` 或外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--require-existing-task-path`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；任务缺少路径或路径不存在时跳过并返回失败退出码，报告保留原因和建议。同步更新 README 与 SKILL。 | 已实现 | eb3c488 |
 
 #### 去重审查
 
@@ -1067,6 +1067,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量任务路径存在门禁 | 团队批量生成前要求所有任务路径锚点在当前仓库中真实存在，避免无效边界进入执行。 | 先跑 `--inspect-paths` 再人工解析路径错误，或外部写脚本检查 path 字段；真实生成本身仍不会阻断坏路径。 | 一条命令在生成/dry-run/check/lint-output 主流程中阻断缺失或不存在的路径，报告给出修复建议，减少无效 `/goal` 下发。 | 是路径可用性准入门禁，不是路径画像报告或单纯字段存在检查。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-existing-task-path"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、存在路径清单 `--dry-run --require-existing-task-path` 通过并断言成功 1/跳过 0、含不存在路径清单返回失败退出码并断言“任务路径不存在”、缺失路径清单返回失败退出码并断言“缺少任务路径”、`--check` 与 `--lint-output` 组合均返回失败退出码并保留路径错误原因、`--inspect-paths` 无效组合参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1075,7 +1079,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 31 轮审查清单已建立，正在实现批量任务路径存在门禁；累计修复 4 个已完成问题，新增 30 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 31 轮已完成，准备进入第 32 轮；累计修复 4 个已完成问题，新增 31 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -1108,4 +1112,5 @@
 - 第 28 轮：批量关键要素显式来源门禁（7791bee）
 - 第 29 轮：批量关键字段禁用默认兜底门禁（d5b0982）
 - 第 30 轮：批量任务路径必填门禁（3f4db34）
-剩余风险：`--require-task-path` 只检查 path/inspect_path/target_path 字段是否存在，不检查路径是否真实可读，仍需配合 `--inspect-paths` 或人工复核路径有效性；路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；`--require-explicit-fields` 只把任务 `fields` 和 `description` 中的显式字段标签视为显式来源，不把自由散文中的启发式命中算作显式，团队可能需要在清单中统一标注关键字段；`--forbid-default-fields` 依赖现有缺失识别与默认填充列表，只能防止指定字段落到默认值，不能证明描述启发式识别出的字段完全符合业务语义；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
+- 第 31 轮：批量任务路径存在门禁（eb3c488）
+剩余风险：`--require-task-path` 只检查 path/inspect_path/target_path 字段是否存在；`--require-existing-task-path` 只检查路径是否存在，不读取路径内容、不验证是否适合该任务，仍需配合 `--inspect-paths` 或人工复核路径有效性；路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；`--require-explicit-fields` 只把任务 `fields` 和 `description` 中的显式字段标签视为显式来源，不把自由散文中的启发式命中算作显式，团队可能需要在清单中统一标注关键字段；`--forbid-default-fields` 依赖现有缺失识别与默认填充列表，只能防止指定字段落到默认值，不能证明描述启发式识别出的字段完全符合业务语义；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
