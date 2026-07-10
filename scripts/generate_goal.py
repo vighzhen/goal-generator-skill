@@ -543,7 +543,6 @@ def build_capabilities() -> dict[str, object]:
                 "--profile-summary",
                 "--score-summary",
                 "--score-report-md",
-                "--draft-jsonl",
                 "--fail-below-score",
                 "--export-fields-json",
                 "--dedupe",
@@ -670,11 +669,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量可执行度报告",
                 "scenario": "需要把每个任务的可执行度评分和下一步建议贴到 PR 或评审文档。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --score-report-md score_report.md",
-            },
-            {
-                "name": "批量 Goal JSONL 草稿",
-                "scenario": "流水线或机器人希望单文件逐行消费每个任务的可编辑 6 要素草稿和复核状态。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --draft-jsonl drafts.jsonl",
             },
             {
                 "name": "批量可执行度门禁",

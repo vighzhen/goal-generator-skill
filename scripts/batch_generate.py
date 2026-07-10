@@ -21,7 +21,6 @@ from generate_goal import (
     _extract_labeled_fields,
     analyze_description,
     build_task_profile,
-    build_goal_json_draft,
     render_goal_text,
     score_description,
     suggest_goal_fields,
@@ -130,13 +129,6 @@ class FieldsExport:
 
 
 @dataclass(frozen=True)
-class GoalJsonDraft:
-    task_name: str
-    file_slug: str
-    draft: dict[str, object]
-
-
-@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -163,8 +155,6 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    if args.draft_jsonl:
-        return _run_draft_jsonl_mode(tasks, args)
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
@@ -232,7 +222,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
-    parser.add_argument("--draft-jsonl", help="把每个任务的 Goal JSON 草稿写入单个 JSONL 文件，适合流水线逐行消费。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
@@ -402,61 +391,6 @@ def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int 
             f"({score.get('readiness_level', 'unknown')})",
             file=sys.stderr,
         )
-
-
-def _run_draft_jsonl_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    start_time = time.perf_counter()
-    drafts, skipped_tasks = _write_draft_jsonl(tasks, Path(args.draft_jsonl), args.dedupe)
-    stats = BatchStats(len(drafts), len(skipped_tasks), time.perf_counter() - start_time)
-    if args.report_json:
-        _write_draft_jsonl_report(drafts, skipped_tasks, stats, Path(args.report_json))
-    if not (args.summary_only or args.check):
-        print(f"已写入 Goal JSONL 草稿：{args.draft_jsonl}")
-    print(_format_summary(stats))
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    return 0
-
-
-def _write_draft_jsonl(
-    tasks: list[TaskSpec],
-    output_path: Path,
-    dedupe: bool,
-) -> tuple[list[GoalJsonDraft], list[SkippedTask]]:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    drafts: list[GoalJsonDraft] = []
-    skipped_tasks: list[SkippedTask] = []
-    seen_task_keys: set[str] = set()
-    used_slugs: set[str] = set()
-    with output_path.open("w", encoding="utf-8") as output_file:
-        for index, task in enumerate(tasks, start=1):
-            if dedupe and _is_duplicate_task(task, seen_task_keys):
-                reason = "重复任务：任务名和描述已出现过"
-                skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-                continue
-            if task.load_error:
-                skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
-                continue
-            if not task.description:
-                reason = "缺少 description"
-                skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-                continue
-            slug = _unique_slug(task.name, index, used_slugs)
-            draft = _goal_json_draft_payload(task, slug)
-            output_file.write(json.dumps(draft, ensure_ascii=False, separators=(",", ":")) + "\n")
-            drafts.append(GoalJsonDraft(task.name, slug, draft))
-    return drafts, skipped_tasks
-
-
-def _goal_json_draft_payload(task: TaskSpec, slug: str) -> dict[str, object]:
-    draft = build_goal_json_draft(task.description, task.fields, "input_fields")
-    return {
-        "name": task.name,
-        "file_slug": slug,
-        "description": task.description,
-        **draft,
-    }
 
 
 def _run_export_fields_json_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
@@ -1521,37 +1455,6 @@ def _write_fields_export_report(
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_draft_jsonl_report(
-    drafts: list[GoalJsonDraft],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "success_count": stats.success_count,
-        "skipped_count": stats.skipped_count,
-        "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "drafts": [_draft_jsonl_report_item(draft) for draft in drafts],
-        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _draft_jsonl_report_item(draft: GoalJsonDraft) -> dict[str, object]:
-    payload = draft.draft
-    return {
-        "name": draft.task_name,
-        "file_slug": draft.file_slug,
-        "ready_to_generate": payload.get("ready_to_generate", False),
-        "review_required": payload.get("review_required", []),
-        "readiness_score": payload.get("readiness_score", 0),
-        "readiness_level": payload.get("readiness_level", "unknown"),
-        "risk_level": payload.get("risk_level", "unknown"),
-        "risk_score": payload.get("risk_score", 0),
-    }
 
 
 def _write_score_report_markdown(
