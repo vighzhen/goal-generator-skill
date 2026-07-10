@@ -731,6 +731,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "profile-tasks"`、`python3 scripts/batch_generate.py examples/sample_tasks.json --profile-tasks --report-json /tmp/round21_profile_report.json` 并断言 `task_profile.profiled_count`、类型/复杂度/风险分布和缺失要素、字段-only 任务画像来源为 `fields` 的自定义清单验证、`--dedupe --fail-on-skipped` 对重复任务和无效任务返回失败退出码并写入报告、`--profile-tasks --summary-only --output-file --report-json` 输出文件与报告断言、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 22 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 22 轮要求重新读取全部 7 个范围内文件，复核第 21 轮 `--profile-tasks`、批量质量门禁和 CI 退出码语义；暂未发现新的 P0/P1 缺陷，本轮聚焦把批量画像从“可见”推进到“可门禁”。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量画像高风险门禁 | 第 21 轮 `--profile-tasks` 能显示高风险任务数量，但 CI 如果要阻止高风险任务直接进入批量生成，还必须额外解析 JSON；当前缺少一键按画像风险失败退出的门禁。 | 在 `scripts/batch_generate.py` 新增 `--fail-on-high-risk`，仅配合 `--profile-tasks` 使用；当画像中存在 `risk_level=high` 的任务时返回非零退出码，同时继续输出摘要和 `--report-json`，便于团队在批量清单评审阶段阻断高风险任务。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量画像高风险门禁 | `--profile-tasks` | `--profile-tasks` 负责生成画像；新功能把画像结论接入退出码，提供 CI 阻断能力。 | 通过 |
+| 批量画像高风险门禁 | `--fail-on-skipped` / `--check` | 现有门禁只因跳过、输入错误或缺失要素失败；新功能按风险层级失败，拦截的是不同风险维度。 | 通过 |
+| 批量画像高风险门禁 | `--lint-fields` | 字段 lint 检查字段质量；高风险门禁检查任务画像风险，适用于生成前批量组合评审。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量画像高风险门禁 | 团队希望批量任务清单中出现高风险任务时先人工拆分、补充要素或确认边界，不让 CI 继续生成/分派。 | 先跑 `--profile-tasks --report-json`，再用外部脚本解析 `high_risk_count` 或逐任务 `risk_level`。 | 一条命令完成画像和失败退出，降低 CI 接入门槛，强制高风险清单先进入人工复核。 | 不是报告字段增加，而是新增基于风险画像的批量质量门禁。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -739,7 +769,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 21 轮批量任务画像矩阵，准备进入第 22 轮持续进化；累计修复 4 个已完成问题，新增 21 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 22 轮审查清单已建立，正在实现批量画像高风险门禁；累计修复 4 个已完成问题，新增 21 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
