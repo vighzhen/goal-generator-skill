@@ -111,10 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         tasks = _load_tasks(_input_path_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
+        default_values = _load_default_values(args.defaults_json)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.dedupe, args.verbose)
+    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.dedupe, default_values, args.verbose)
     _write_outputs(outputs, args.output_dir, args.output_file, args.summary_only)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
@@ -133,6 +134,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
+    parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
@@ -164,6 +166,19 @@ def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
 
 def _task_matches_filter(task: TaskSpec, matcher: re.Pattern[str]) -> bool:
     return bool(matcher.search(task.name) or matcher.search(task.description))
+
+
+def _load_default_values(defaults_json: str | None) -> dict[str, str]:
+    defaults = dict(INTERACTIVE_DEFAULTS)
+    if not defaults_json:
+        return defaults
+    data = json.loads(Path(defaults_json).read_text(encoding="utf-8"))
+    raw_defaults = data.get("fields", data) if isinstance(data, dict) else data
+    overrides = _fields_from_mapping(raw_defaults)
+    if not overrides:
+        raise ValueError("--defaults-json 必须包含至少一个 6 要素默认值")
+    defaults.update(overrides)
+    return defaults
 
 
 def _load_tasks(input_path: Path) -> list[TaskSpec]:
@@ -425,6 +440,7 @@ def _process_tasks(
     dry_run: bool,
     strict: bool,
     dedupe: bool,
+    default_values: dict[str, str],
     verbose: bool,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
@@ -437,7 +453,7 @@ def _process_tasks(
             skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
             continue
         try:
-            output = _process_one_task(task, index, dry_run, strict, used_slugs, verbose)
+            output = _process_one_task(task, index, dry_run, strict, default_values, used_slugs, verbose)
             outputs.append(output)
         except (ValueError, OSError) as error:
             reason = str(error)
@@ -480,6 +496,7 @@ def _process_one_task(
     index: int,
     dry_run: bool,
     strict: bool,
+    default_values: dict[str, str],
     used_slugs: set[str],
     verbose: bool,
 ) -> TaskOutput:
@@ -487,7 +504,7 @@ def _process_one_task(
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
-    prepared = _prepare_task(task, strict)
+    prepared = _prepare_task(task, strict, default_values)
     content = _format_dry_run(prepared) if dry_run else _format_goal_output(prepared)
     slug = _unique_slug(task.name, index, used_slugs)
     if verbose:
@@ -502,7 +519,11 @@ def _process_one_task(
     )
 
 
-def _prepare_task(task: TaskSpec, strict: bool = False) -> PreparedTask:
+def _prepare_task(
+    task: TaskSpec,
+    strict: bool = False,
+    default_values: dict[str, str] | None = None,
+) -> PreparedTask:
     analysis = analyze_description(task.description)
     values = _extract_labeled_fields(task.description)
     values.update(task.fields)
@@ -510,7 +531,7 @@ def _prepare_task(task: TaskSpec, strict: bool = False) -> PreparedTask:
     missing_before_defaults = _missing_keys(values)
     if strict and missing_before_defaults:
         raise ValueError(f"strict 模式缺失要素：{_format_labels(missing_before_defaults)}")
-    defaulted_keys = _apply_defaults(values)
+    defaulted_keys = _apply_defaults(values, default_values or INTERACTIVE_DEFAULTS)
     goal = _goal_from_values(values)
     present_keys = [key for key in ELEMENT_ORDER if key not in missing_before_defaults]
     return PreparedTask(task, goal, present_keys, missing_before_defaults, defaulted_keys)
@@ -560,11 +581,11 @@ def _missing_keys(values: dict[str, str]) -> list[str]:
     return [key for key in ELEMENT_ORDER if not values.get(key)]
 
 
-def _apply_defaults(values: dict[str, str]) -> list[str]:
+def _apply_defaults(values: dict[str, str], default_values: dict[str, str]) -> list[str]:
     defaulted_keys: list[str] = []
     for key in ELEMENT_ORDER:
         if not values.get(key):
-            values[key] = INTERACTIVE_DEFAULTS[key]
+            values[key] = default_values[key]
             defaulted_keys.append(key)
     return defaulted_keys
 
