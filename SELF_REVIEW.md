@@ -497,7 +497,7 @@
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 单任务模板 Markdown 展示 | 用户想把某个内置任务模板直接贴到 PR、Issue 或需求文档中给需求方填写；当前 --template 只输出 JSON，不够适合人工协作。 | 在 generate_goal.py 新增 --template-md <id>，把内置模板渲染为 Markdown 标题、适用场景和 6 要素填写表。 | 已实现 | 3025b4c |
-| 2 | 批量字段状态 CSV | 团队用表格维护大量任务时，需要快速看到每个任务 6 要素是输入提供、默认填充还是缺失；当前报告主要是 JSON/Markdown，不便导入电子表格做筛选。 | 在 batch_generate.py 新增 --field-status-csv <path>，输出任务名、评分、风险、缺失/默认填充摘要和每个 6 要素的 present/defaulted/missing/skipped 状态列。 | 已实现 | 待提交 |
+| 2 | 批量字段状态 CSV | 团队用表格维护大量任务时，需要快速看到每个任务 6 要素是输入提供、默认填充还是缺失；当前报告主要是 JSON/Markdown，不便导入电子表格做筛选。 | 在 batch_generate.py 新增 --field-status-csv <path>，输出任务名、评分、风险、缺失/默认填充摘要和每个 6 要素的 present/defaulted/missing/skipped 状态列。 | 已实现 | b41df99 |
 
 ### 本轮总结
 
