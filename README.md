@@ -245,6 +245,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-outp
 # 批量扫描任务 path/inspect_path/target_path 指向的本地路径，生成代码上下文画像
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --inspect-paths --report-json path_inspection.json
 
+# 用路径画像 suggested_fields 回填缺失或仅由描述启发式推断的 6 要素，输出增强后的任务 JSON
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --enrich-from-paths --output-file enriched_tasks.json --report-json path_enrichment.json
+
 # 从 CSV 批量分析，适合用表格工具编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
 
@@ -317,7 +320,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--input` 和位置参数都可指定输入文件；推荐在脚本中显式使用 `--input`。
 - 当前批量输入只支持 JSON 和 CSV，其他格式不再作为核心能力维护。
 - JSON 任务可选 `depends_on` 或 `dependencies` 字段；CSV 可选 `depends_on` 或 `dependencies` 表头，多个依赖用逗号、分号、顿号或换行分隔。
-- JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1。
+- JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1；`--enrich-from-paths` 会把路径画像中的 `suggested_fields` 回填到缺失或仅由描述启发式推断的 6 要素，不覆盖用户显式填写的字段。
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--defaults-json <path>` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 可覆盖默认填充策略。
@@ -326,6 +329,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--questions` 不生成 `/goal` 正文，而是按任务名汇总缺失要素并生成可直接发送的追问文案；可配合 `--output-file` 保存文案，配合 `--report-json` 保存任务级缺失结构。
 - `--merge-supplements <path>` 不生成 `/goal` 正文，而是读取按任务名组织的补充回答 JSON/CSV，把补充文本、显式 6 要素字段和原任务的 `description`/`fields` 合并为新的任务 JSON；可配合 `--output-file` 保存合并清单，配合 `--report-json` 查看字段来源、未匹配补充和剩余缺口，配合 `--check` 在仍缺要素、输入错误或补充任务名未匹配时失败退出。
 - `--inspect-paths` 不生成 `/goal` 正文，而是批量复用单任务 `--inspect-path` 的代码事实采集能力；支持 `--filter`、`--limit`、`--sort-by`、`--dedupe`、`--summary-only`、`--output-file` 和 `--report-json`，适合在批量生成前统一补齐边界、验证命令和风险线索。
+- `--enrich-from-paths` 不生成 `/goal` 正文，而是扫描任务路径并输出增强后的任务 JSON；它保留 `name`、`description`、`inspect_path`、`depends_on` 和用户已有 `fields`，只为缺失或仅由描述启发式推断的要素写入路径画像建议，并在 `--report-json` 的 `path_enrichment` 中记录字段来源、路径错误、剩余缺失和可生成状态。
 - `--lint-output` 只用于真实生成模式，不与 `--dry-run` 或 `--check` 同用；它会在写出 stdout/`--output-file`/`--output-dir` 交付物前逐任务检查最终 `/goal` 文本的结构和语义质量，任一输出未通过时退出码为 1，并把 `output_lint` 写入 `--report-json`。
 - `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。
 - `--redaction-check` 不生成 `/goal` 正文，而是逐个任务审计名称、描述和 6 要素字段值中的 token、密钥、邮箱、URL 等敏感片段；发现风险时退出码为 1，并在报告中提供脱敏预览。
@@ -357,7 +361,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 ]
 ```
 
-CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`response`、`text`、`description` 以及 6 要素字段列。合并时，原任务的 `fields` 作为基线，补充回答中的显式标签和字段会覆盖对应要素；自然语言回答会用于推断仍缺的要素。输出 JSON 保留 `name`、`description`、`depends_on` 和合并后的 `fields`，可继续交给 `--lint-fields`、`--check` 或批量生成命令。
+CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`response`、`text`、`description` 以及 6 要素字段列。合并时，原任务的 `fields` 作为基线，补充回答中的显式标签和字段会覆盖对应要素；自然语言回答会用于推断仍缺的要素。输出 JSON 保留 `name`、`description`、`inspect_path`、`depends_on` 和合并后的 `fields`，可继续交给 `--enrich-from-paths`、`--lint-fields`、`--check` 或批量生成命令。
 
 ## 6 个必要要素
 
@@ -400,6 +404,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 批量任务 6 要素字段语义质量门禁
 - 批量生成后最终 `/goal` 输出自检门禁
 - 批量任务路径上下文画像、项目验证命令和风险线索汇总
+- 批量路径建议字段回填为可生成任务 JSON
 - 批量任务依赖计划、未知依赖和循环依赖检查
 - 批量任务依赖顺序生成和检查
 - 批量 JSON 报告、输出目录、输出文件、团队默认值配置

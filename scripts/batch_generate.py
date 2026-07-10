@@ -127,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.redaction_check
         or args.lint_fields
         or args.inspect_paths
+        or args.enrich_from_paths
         or args.plan_dependencies
         or args.list_tasks
         or args.dry_run
@@ -148,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_lint_fields_mode(tasks, args, start_time)
     if args.inspect_paths:
         return _run_inspect_paths_mode(tasks, args, start_time)
+    if args.enrich_from_paths:
+        return _run_enrich_from_paths_mode(tasks, args, start_time)
     if args.plan_dependencies:
         return _run_dependency_plan_mode(tasks, args, start_time)
     if args.list_tasks:
@@ -234,6 +237,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--inspect-paths", action="store_true", help="批量扫描任务 path/inspect_path/target_path 指向的本地路径并输出上下文建议。")
+    parser.add_argument("--enrich-from-paths", action="store_true", help="用任务路径扫描的 suggested_fields 回填缺失或启发式 6 要素并输出增强后的任务 JSON。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
@@ -1333,6 +1337,203 @@ def _format_inspect_paths_summary(inspection_report: dict[str, object], skipped_
         "路径上下文画像完成："
         f"通过 {inspection_report.get('passed_count', 0)} 个，"
         f"失败 {inspection_report.get('failed_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
+
+
+def _run_enrich_from_paths_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--enrich-from-paths 不支持 --output-dir，请使用 --output-file 写入增强后的任务 JSON。", file=sys.stderr)
+        return 1
+    enrich_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    enrichment_report = _build_path_enrichment_report(enrich_tasks)
+    enriched_json = json.dumps(enrichment_report["enriched_tasks"], ensure_ascii=False, indent=2)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(enriched_json, Path(args.output_file))
+    elif not summary_only:
+        print(enriched_json)
+    elapsed_seconds = time.perf_counter() - start_time
+    unready_count = int(enrichment_report["task_count"]) - int(enrichment_report["ready_count"])
+    stats = BatchStats(int(enrichment_report["ready_count"]), unready_count + len(skipped_tasks), elapsed_seconds)
+    if args.report_json:
+        _write_path_enrichment_report(enrichment_report, skipped_tasks, stats, Path(args.report_json))
+    print(_format_path_enrichment_summary(enrichment_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if int(enrichment_report["path_error_count"]):
+        return 1
+    if fail_on_skipped and (not enrichment_report["valid"] or skipped_tasks):
+        return 1
+    return 0
+
+
+def _build_path_enrichment_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_results = [_path_enrichment_task_result(task) for task in tasks]
+    task_reports = [result["report"] for result in task_results]
+    enriched_tasks = [result["task"] for result in task_results]
+    ready_count = sum(1 for report in task_reports if report["ready_to_generate"])
+    enriched_count = sum(1 for report in task_reports if report["filled_fields"])
+    path_error_count = sum(1 for report in task_reports if report["path_error"])
+    missing_field_count = sum(len(report["missing_after"]) for report in task_reports)
+    input_error_count = sum(1 for report in task_reports if report["input_error"])
+    return {
+        "valid": ready_count == len(task_reports) and path_error_count == 0,
+        "task_count": len(task_reports),
+        "ready_count": ready_count,
+        "unready_count": len(task_reports) - ready_count,
+        "enriched_count": enriched_count,
+        "path_error_count": path_error_count,
+        "input_error_count": input_error_count,
+        "missing_field_count": missing_field_count,
+        "tasks": task_reports,
+        "enriched_tasks": enriched_tasks,
+    }
+
+
+def _path_enrichment_task_result(task: TaskSpec) -> dict[str, object]:
+    values, field_sources = _task_lint_field_values(task)
+    input_error = _path_enrichment_input_error(task)
+    missing_before = _missing_keys(values)
+    fill_candidates = _path_enrichment_fill_candidates(values, field_sources)
+    path_value = task.inspect_path
+    path_source = "task.path_alias" if task.inspect_path else ""
+    path_error = ""
+    inspection_summary: dict[str, object] = {}
+    filled_fields: list[str] = []
+    if not input_error and fill_candidates:
+        path_value, path_source = _task_inspection_path(task)
+        if not path_value:
+            path_error = "缺少 path/inspect_path/target_path，且 description/fields 中未发现可扫描路径"
+        else:
+            try:
+                context = inspect_path_context(path_value, task.description)
+            except (OSError, ValueError) as error:
+                path_error = str(error)
+            else:
+                inspection_summary = _path_enrichment_inspection_summary(context)
+                suggested_fields = context.get("suggested_fields", {})
+                if isinstance(suggested_fields, dict):
+                    filled_fields = _apply_path_suggested_fields(values, field_sources, fill_candidates, suggested_fields)
+    missing_after = _missing_keys(values)
+    ready_to_generate = not input_error and not missing_after
+    return {
+        "task": _path_enriched_task_json(task, path_value, values),
+        "report": {
+            "name": task.name,
+            "ready_to_generate": ready_to_generate,
+            "input_error": input_error,
+            "inspect_path": path_value,
+            "path_source": path_source or "not_needed",
+            "path_error": path_error,
+            "missing_before": missing_before,
+            "missing_after": missing_after,
+            "filled_fields": filled_fields,
+            "present_fields": [key for key in ELEMENT_ORDER if key not in missing_after],
+            "field_sources": field_sources,
+            "inspection": inspection_summary,
+            "summary": _path_enrichment_task_summary(input_error, path_error, filled_fields, missing_after),
+        },
+    }
+
+
+def _path_enrichment_input_error(task: TaskSpec) -> str:
+    if task.load_error:
+        return task.load_error
+    if not task.description:
+        return "缺少 description"
+    return ""
+
+
+def _path_enrichment_inspection_summary(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "kind": context.get("kind", "unknown"),
+        "file_count": context.get("file_count", 0),
+        "language_counts": context.get("language_counts", {}),
+        "verification_hints": context.get("verification_hints", []),
+        "risk_flags": context.get("risk_flags", []),
+        "suggested_fields": context.get("suggested_fields", {}),
+    }
+
+
+def _path_enrichment_fill_candidates(values: dict[str, str], field_sources: dict[str, str]) -> list[str]:
+    return [
+        key
+        for key in ELEMENT_ORDER
+        if not values.get(key) or field_sources.get(key) == "description_inferred"
+    ]
+
+
+def _apply_path_suggested_fields(
+    values: dict[str, str],
+    field_sources: dict[str, str],
+    fill_candidates: list[str],
+    suggested_fields: dict[object, object],
+) -> list[str]:
+    filled_fields: list[str] = []
+    for key in fill_candidates:
+        value = _string_value(suggested_fields.get(key))
+        if not value:
+            continue
+        values[key] = value
+        field_sources[key] = "path_suggested"
+        filled_fields.append(key)
+    return filled_fields
+
+
+def _path_enriched_task_json(task: TaskSpec, path_value: str, values: dict[str, str]) -> dict[str, object]:
+    item: dict[str, object] = {"name": task.name, "description": task.description}
+    if path_value:
+        item["inspect_path"] = path_value
+    if task.depends_on:
+        item["depends_on"] = task.depends_on
+    fields = {key: values[key] for key in ELEMENT_ORDER if values.get(key)}
+    if fields:
+        item["fields"] = fields
+    return item
+
+
+def _path_enrichment_task_summary(
+    input_error: str,
+    path_error: str,
+    filled_fields: list[str],
+    missing_after: list[str],
+) -> str:
+    if input_error:
+        return f"任务输入需修复：{input_error}"
+    if path_error:
+        return f"路径回填失败：{path_error}"
+    prefix = f"已从路径画像回填 {len(filled_fields)} 个要素" if filled_fields else "无需路径回填或未发现可回填要素"
+    if missing_after:
+        return f"{prefix}；仍缺 {_format_labels(missing_after)}。"
+    return f"{prefix}；6 要素已具备，可继续生成。"
+
+
+def _write_path_enrichment_report(
+    enrichment_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "path_enrichment": enrichment_report,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_path_enrichment_summary(enrichment_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "路径建议字段回填完成："
+        f"任务 {enrichment_report.get('task_count', 0)} 个，"
+        f"可生成 {enrichment_report.get('ready_count', 0)} 个，"
+        f"已回填 {enrichment_report.get('enriched_count', 0)} 个，"
+        f"路径错误 {enrichment_report.get('path_error_count', 0)} 个，"
+        f"剩余缺失 {enrichment_report.get('missing_field_count', 0)} 个，"
+        f"输入错误 {enrichment_report.get('input_error_count', 0)} 个，"
         f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
     )
 
