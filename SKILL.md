@@ -14,12 +14,13 @@ description: Codex CLI Goal 指令生成器。用户描述编码任务需求，S
 ## 2. 工作流步骤
 
 1. **接收输入**：读取用户的一句话需求或详细需求，识别任务类型，例如代码质量优化、重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成。
-2. **调用脚本分析**：优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；必要时结合上下文人工复核。
-3. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
-4. **一次性追问**：如果存在缺失或含糊要素，一次性列出全部缺失项并给出示例，不要逐项来回追问。
-5. **整合用户补充**：用户回答后，把原始需求和补充信息合并为 6 个明确字段；如果仍缺关键技术决策，不要代替用户决定，继续一次性追问剩余关键缺口。
-6. **生成指令**：调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令。
-7. **输出结果**：先用 1-2 句话确认已生成什么指令、强调哪些关键约束；再输出带分隔线的纯文本 `/goal` 指令，不能用 Markdown 代码块包裹。
+2. **判断单任务或批量任务**：如果用户一次提供多个编码任务需求，或提供 JSON/CSV 任务文件路径，调用 `scripts/batch_generate.py` 批量分析和生成；单个任务继续使用 `scripts/generate_goal.py`。
+3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
+4. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
+5. **一次性追问**：如果存在缺失或含糊要素，一次性列出全部缺失项并给出示例，不要逐项来回追问。批量任务应按任务名称汇总缺失项。
+6. **整合用户补充**：用户回答后，把原始需求和补充信息合并为 6 个明确字段；如果仍缺关键技术决策，不要代替用户决定，继续一次性追问剩余关键缺口。
+7. **生成指令**：单任务调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令；批量任务调用 `scripts/batch_generate.py --input <文件>`，可按需使用 `--output-dir` 或 `--output-file`。
+8. **输出结果**：先用 1-2 句话确认已生成什么指令、强调哪些关键约束；再输出带分隔线的纯文本 `/goal` 指令，不能用 Markdown 代码块包裹。批量输出时每个任务之间保留任务名称和空行分隔。
 
 ## 3. 6 要素定义和检查逻辑
 
@@ -128,7 +129,7 @@ Blocked Stop Condition 是何时允许跳过、何时必须停下问人。例如
 
 ## 9. 适用和不适用场景
 
-适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成等需要 Codex 自主执行多个步骤的编码任务。
+适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
 
 不适用场景：非编码任务、主要依赖人工判断的设计决策、一次性小改动、没有明确验证面的探索性讨论。
 
