@@ -564,6 +564,7 @@ def build_capabilities() -> dict[str, object]:
                 "--review-board-md",
                 "--risk-report-md",
                 "--questions-md",
+                "--redaction-report-md",
                 "--draft-jsonl",
                 "--fail-below-score",
                 "--export-fields-json",
@@ -721,6 +722,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量追问 Markdown 包",
                 "scenario": "团队希望把每个任务需要补的信息整理成可直接发送给需求方的追问文案。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --questions-md questions.md",
+            },
+            {
+                "name": "批量敏感信息报告",
+                "scenario": "团队分发批量任务清单前，先审计哪些任务含 token、邮箱、URL 等需要脱敏的片段。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --redaction-report-md redaction_report.md",
             },
             {
                 "name": "批量 Goal JSONL 草稿",
