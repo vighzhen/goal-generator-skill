@@ -23,7 +23,6 @@ from generate_goal import (
     build_task_profile,
     render_goal_text,
     score_description,
-    suggest_goal_fields,
 )
 
 SUPPORTED_SUFFIXES: tuple[str, ...] = (
@@ -122,13 +121,6 @@ class TaskScoreSummary:
 
 
 @dataclass(frozen=True)
-class FieldsExport:
-    task_name: str
-    output_path: str
-    review_required: list[str]
-
-
-@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -155,8 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    if args.export_fields_json:
-        return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
         return _run_score_summary_mode(tasks, args)
     if args.profile_summary:
@@ -223,7 +213,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
-    parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -393,19 +382,6 @@ def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int 
         )
 
 
-def _run_export_fields_json_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    start_time = time.perf_counter()
-    exports, skipped_tasks = _export_fields_json(tasks, Path(args.export_fields_json), args.dedupe, args.summary_only)
-    stats = BatchStats(len(exports), len(skipped_tasks), time.perf_counter() - start_time)
-    if args.report_json:
-        _write_fields_export_report(exports, skipped_tasks, stats, Path(args.report_json))
-    print(_format_summary(stats))
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    return 0
-
-
 def _run_field_status_csv_mode(
     tasks: list[TaskSpec],
     args: argparse.Namespace,
@@ -426,76 +402,6 @@ def _run_field_status_csv_mode(
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
-
-
-def _export_fields_json(
-    tasks: list[TaskSpec],
-    output_dir: Path,
-    dedupe: bool,
-    summary_only: bool = False,
-) -> tuple[list[FieldsExport], list[SkippedTask]]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    exports: list[FieldsExport] = []
-    skipped_tasks: list[SkippedTask] = []
-    seen_task_keys: set[str] = set()
-    used_slugs: set[str] = set()
-    for index, task in enumerate(tasks, start=1):
-        if dedupe and _is_duplicate_task(task, seen_task_keys):
-            reason = "重复任务：任务名和描述已出现过"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        if task.load_error:
-            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
-            continue
-        if not task.description:
-            reason = "缺少 description"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        slug = _unique_slug(task.name, index, used_slugs)
-        export_path = output_dir / f"{slug}.json"
-        export_payload = _fields_export_payload(task, slug)
-        export_path.write_text(json.dumps(export_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        review_required = _review_required_fields(export_payload)
-        exports.append(FieldsExport(task.name, str(export_path), review_required))
-        if not summary_only:
-            print(f"已导出字段建议：{task.name} -> {export_path}")
-    return exports, skipped_tasks
-
-
-def _fields_export_payload(task: TaskSpec, slug: str) -> dict[str, object]:
-    suggestion = suggest_goal_fields(task.description)
-    fields = _object_string_mapping(suggestion.get("fields", {}))
-    sources = _object_string_mapping(suggestion.get("sources", {}))
-    for key, value in task.fields.items():
-        fields[key] = value
-        sources[key] = "input_fields"
-    review_required = [key for key in ELEMENT_ORDER if sources.get(key) == "recommended_direction"]
-    return {
-        "name": task.name,
-        "description": task.description,
-        "file_slug": slug,
-        "fields": {key: fields.get(key, "") for key in ELEMENT_ORDER},
-        "sources": {key: sources.get(key, "unknown") for key in ELEMENT_ORDER},
-        "missing": suggestion.get("missing", []),
-        "present": suggestion.get("present", {}),
-        "task_type": suggestion.get("task_type", {}),
-        "score": suggestion.get("score", {}),
-        "review_required": review_required,
-        "note": "review_required 字段来自推荐方向，执行 --generate --from-json 前请按真实项目情况复核；input_fields 表示批量输入中显式提供的字段。",
-    }
-
-
-def _object_string_mapping(value: object) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    return {str(key): str(raw_value) for key, raw_value in value.items() if raw_value is not None}
-
-
-def _review_required_fields(export_payload: dict[str, object]) -> list[str]:
-    review_required = export_payload.get("review_required", [])
-    if not isinstance(review_required, list):
-        return []
-    return [key for key in review_required if isinstance(key, str) and key in ELEMENT_ORDER]
 
 
 def _build_profile_summaries(
@@ -1431,30 +1337,6 @@ def _score_gate_report(scored_tasks: list[TaskScoreSummary], threshold: int | No
             for failure in failures
         ],
     }
-
-
-def _write_fields_export_report(
-    exports: list[FieldsExport],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "success_count": stats.success_count,
-        "skipped_count": stats.skipped_count,
-        "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "exports": [
-            {
-                "name": export.task_name,
-                "output_path": export.output_path,
-                "review_required": export.review_required,
-            }
-            for export in exports
-        ],
-        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _write_score_report_markdown(
