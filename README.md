@@ -212,6 +212,16 @@ python3 scripts/generate_goal.py --lint-goal-tree output/
 
 命令会跳过 `.git`、缓存目录、依赖目录和构建产物目录，按相对路径稳定排序输出 `file_count`、`passed_count`、`failed_count`、`skipped_directories` 和每个文件的 `relative_path`、结构校验与语义质量结果；遇到合集文件时同样自动逐段检查并嵌入 `bundle` 详情。任一文件或任一合集块未通过、目录树内没有 `.txt` 目标文件时退出码为 1。若只想检查目录直属文件，继续使用 `--lint-goal-dir`。
 
+### 自动检查 /goal 交付路径
+
+如果 CI 或脚本只拿到一个交付路径，无法提前判断它是单个 `/goal` 文件、合集文件还是目录树，可用统一入口自动选择质量门禁：
+
+```bash
+python3 scripts/generate_goal.py --lint-goal-path output_or_goal.txt
+```
+
+文件路径会自动区分普通单目标文本与多个标准分隔块/分隔线不配对的合集文本；目录路径默认执行递归目录树检查。报告会包含 `auto_mode`（`file`、`bundle_file` 或 `directory_tree`），并保持任一文件或任一合集块未通过时退出码为 1。
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -415,6 +425,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 包含多个 `/goal` 块的合集文件逐段语义质量门禁
 - `/goal` 输出目录结构与语义质量门禁
 - `/goal` 嵌套输出目录树递归结构与语义质量门禁
+- `/goal` 文件/合集/目录树统一路径自动质量门禁
 - 一键生成可复制的缺失要素追问文案
 - 批量任务缺失要素追问文案
 - 批量追问回答合并回任务清单

@@ -636,6 +636,10 @@ def main(argv: list[str] | None = None) -> int:
             lint_report = lint_goal_tree(args.lint_goal_tree)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
+        if args.lint_goal_path:
+            lint_report = lint_goal_path(args.lint_goal_path)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.validate_fields_json:
             validation = validate_fields_json_file(args.validate_fields_json)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
@@ -676,6 +680,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lint-goal-bundle", help="逐段检查同一文件内多个 .txt /goal 文本的结构和 6 要素语义质量。")
     parser.add_argument("--lint-goal-dir", help="批量检查目录内 .txt /goal 文件的结构和 6 要素语义质量。")
     parser.add_argument("--lint-goal-tree", help="递归检查目录树内 .txt /goal 文件的结构和 6 要素语义质量。")
+    parser.add_argument("--lint-goal-path", help="自动识别文件、合集文件或目录树并检查 /goal 语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
@@ -807,6 +812,25 @@ def lint_goal_tree(goal_dir: str) -> dict[str, object]:
         "files": file_reports,
         "summary": _goal_tree_lint_summary(passed, len(goal_files), len(failed_reports)),
     }
+
+
+def lint_goal_path(path_value: str) -> dict[str, object]:
+    """自动识别文件、合集文件或目录树并执行 /goal 质量门禁。"""
+    goal_path = Path(path_value)
+    if not goal_path.exists():
+        raise ValueError(f"--lint-goal-path 不存在：{path_value}")
+    if goal_path.is_file():
+        return _lint_goal_path_file(goal_path)
+    if goal_path.is_dir():
+        return {"auto_mode": "directory_tree", **lint_goal_tree(str(goal_path))}
+    raise ValueError(f"--lint-goal-path 必须是文件或目录：{path_value}")
+
+
+def _lint_goal_path_file(goal_path: Path) -> dict[str, object]:
+    goal_text = goal_path.read_text(encoding="utf-8")
+    if _goal_text_requires_bundle_lint(goal_text):
+        return {"auto_mode": "bundle_file", **lint_goal_bundle_text(goal_text, str(goal_path))}
+    return {"auto_mode": "file", **lint_goal_text(goal_text, str(goal_path))}
 
 
 def _goal_dir_files(directory: Path) -> list[Path]:
