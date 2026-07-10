@@ -550,7 +550,6 @@ def build_capabilities() -> dict[str, object]:
                 "--output-file",
                 "--report-json",
                 "--report-md",
-                "--missing-report-md",
                 "--index-md",
                 "--include-profile",
                 "--verbose",
@@ -654,11 +653,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量风险摘要",
                 "scenario": "团队评审时快速查看任务类型、风险等级和缺失要素。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-summary --sort-by name",
-            },
-            {
-                "name": "批量缺失要素报告",
-                "scenario": "团队只想聚焦每个任务缺哪些信息、风险多高以及该怎么补齐。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --missing-report-md missing_report.md",
             },
         ],
     }
