@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         required_explicit_fields = _required_explicit_fields_from_args(args)
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
         require_task_path = _require_task_path_from_args(args)
+        require_existing_task_path = _require_existing_task_path_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -208,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         required_explicit_fields,
         forbidden_default_fields,
         require_task_path,
+        require_existing_task_path,
     )
     output_lint_report = None
     if args.lint_output:
@@ -257,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     if forbidden_default_fields and _has_forbidden_default_skips(skipped_tasks):
         return 1
     if require_task_path and _has_required_path_skips(skipped_tasks):
+        return 1
+    if require_existing_task_path and (_has_required_path_skips(skipped_tasks) or _has_missing_existing_path_skips(skipped_tasks)):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -316,6 +320,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-task-path",
         action="store_true",
         help="真实生成、dry-run、check 或 lint-output 时要求每个任务提供 path/inspect_path/target_path。",
+    )
+    parser.add_argument(
+        "--require-existing-task-path",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求任务 path/inspect_path/target_path 在本地存在。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -423,6 +432,25 @@ def _require_task_path_from_args(args: argparse.Namespace) -> bool:
         or args.list_tasks
     ):
         raise ValueError("--require-task-path 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
+
+
+def _require_existing_task_path_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_existing_task_path:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-existing-task-path 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return True
 
 
@@ -2604,6 +2632,7 @@ def _process_tasks(
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
+    require_existing_task_path: bool = False,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2627,6 +2656,7 @@ def _process_tasks(
                 required_explicit_fields or [],
                 forbidden_default_fields or [],
                 require_task_path,
+                require_existing_task_path,
             )
             outputs.append(output)
         except (ValueError, OSError) as error:
@@ -2654,6 +2684,8 @@ def _skip_suggestion(reason: str) -> str:
         return "为该任务补充 description 字段，说明编码目标和上下文。"
     if "缺少任务路径" in reason:
         return "为该任务补充 path、inspect_path 或 target_path，指向本地文件或目录。"
+    if "任务路径不存在" in reason:
+        return "修正 path、inspect_path 或 target_path，确保其相对当前工作目录存在且可访问。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
@@ -2683,13 +2715,16 @@ def _process_one_task(
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
+    require_existing_task_path: bool = False,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
-    if require_task_path and not task.inspect_path:
+    if (require_task_path or require_existing_task_path) and not task.inspect_path:
         raise ValueError(_required_task_path_error())
+    if require_existing_task_path and not Path(task.inspect_path).exists():
+        raise ValueError(_missing_existing_task_path_error(task.inspect_path))
     missing_explicit_fields = _missing_explicit_fields(task, required_explicit_fields or [])
     if missing_explicit_fields:
         raise ValueError(_missing_explicit_fields_error(missing_explicit_fields))
@@ -2731,6 +2766,14 @@ def _required_task_path_error() -> str:
 
 def _has_required_path_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("缺少任务路径" in skipped.reason for skipped in skipped_tasks)
+
+
+def _missing_existing_task_path_error(task_path: str) -> str:
+    return f"任务路径不存在：{task_path}；--require-existing-task-path 要求 path/inspect_path/target_path 指向本地已存在路径"
+
+
+def _has_missing_existing_path_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("任务路径不存在" in skipped.reason for skipped in skipped_tasks)
 
 
 def _forbidden_defaulted_fields(defaulted_keys: list[str], forbidden_fields: list[str]) -> list[str]:
