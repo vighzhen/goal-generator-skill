@@ -386,12 +386,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.list_templates:
             _emit_output(json.dumps(list_task_templates(), ensure_ascii=False, indent=2), args.output_file)
             return 0
-        if args.capabilities:
-            _emit_output(json.dumps(build_capabilities(), ensure_ascii=False, indent=2), args.output_file)
-            return 0
-        if args.examples:
-            _emit_output(json.dumps(build_usage_examples(), ensure_ascii=False, indent=2), args.output_file)
-            return 0
         if args.template:
             _emit_output(json.dumps(get_task_template(args.template), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -462,8 +456,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
-    parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
-    parser.add_argument("--examples", action="store_true", help="输出常见单任务和批量命令示例 JSON。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
     parser.add_argument("--template-md", help="把指定任务类型模板渲染为适合 PR、Issue 或需求文档粘贴的 Markdown。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
@@ -498,154 +490,6 @@ def list_task_templates() -> list[dict[str, str]]:
     templates = [{"id": profile_id, "label": label} for profile_id, label, _keywords, _template in PROFILE_RULES]
     templates.append({"id": "generic", "label": "通用编码任务"})
     return templates
-
-
-def build_capabilities() -> dict[str, object]:
-    """输出当前脚本和批量工具支持的能力清单。"""
-    return {
-        "single_task": {
-            "commands": [
-                "--analyze",
-                "--questions",
-                "--profile",
-                "--score",
-                "--goal-json",
-                "--redaction-check",
-                "--questions-json",
-                "--suggest-fields",
-                "--explain-missing",
-                "--list-templates",
-                "--template",
-                "--template-md",
-                "--capabilities",
-                "--examples",
-                "--validate-goal-file",
-                "--validate-fields-json",
-                "--draft",
-                "--generate",
-                "--interactive",
-                "--from-json",
-                "--output-file",
-            ],
-            "template_ids": [template["id"] for template in list_task_templates()],
-        },
-        "batch": {
-            "formats": ["json", "csv"],
-            "options": [
-                "--input",
-                "--defaults-json",
-                "GOAL_GENERATOR_DEFAULTS_JSON",
-                "--filter",
-                "--sort-by",
-                "--limit",
-                "--list-tasks",
-                "--dedupe",
-                "--check",
-                "--strict",
-                "--fail-on-skipped",
-                "--summary-only",
-                "--output-dir",
-                "--output-file",
-                "--report-json",
-                "--verbose",
-            ],
-        },
-        "guarantees": [
-            "不引入第三方依赖",
-            "保持 /goal 五段式结构和分隔线格式",
-            "批量任务失败时跳过并继续处理其他任务",
-        ],
-    }
-
-
-def build_usage_examples() -> dict[str, object]:
-    """输出常见使用场景对应的命令示例。"""
-    return {
-        "single_task": [
-            {
-                "name": "分析一句话需求",
-                "scenario": "用户只给出粗略编码任务，需要先确认缺哪些 6 要素。",
-                "command": "python3 scripts/generate_goal.py --analyze '给项目加单元测试'",
-            },
-            {
-                "name": "生成任务画像",
-                "scenario": "追问前先判断任务类型、复杂度、风险和推荐填写方向。",
-                "command": "python3 scripts/generate_goal.py --profile '修复登录 API 在空 token 场景下偶发 500 的问题'",
-            },
-            {
-                "name": "评估可执行度",
-                "scenario": "快速判断一句需求距离可直接生成高质量 /goal 还差多少。",
-                "command": "python3 scripts/generate_goal.py --score '给项目加单元测试'",
-            },
-            {
-                "name": "生成 Goal JSON 草稿",
-                "scenario": "IDE、机器人或流水线需要一次拿到可编辑 6 要素、人工复核状态、校验结果和下一步命令。",
-                "command": "python3 scripts/generate_goal.py --goal-json '给项目加单元测试'",
-            },
-            {
-                "name": "检查敏感信息",
-                "scenario": "把任务描述分享给机器人、Issue 或外部系统前，先发现 token、邮箱、URL 等可能需要脱敏的内容。",
-                "command": "python3 scripts/generate_goal.py --redaction-check '修复登录问题，token=abcdef1234567890，联系 owner@example.com'",
-            },
-            {
-                "name": "生成机器可读追问包",
-                "scenario": "IDE、表单或机器人需要结构化拿到缺失要素、追问优先级和推荐补法。",
-                "command": "python3 scripts/generate_goal.py --questions-json '给项目加单元测试'",
-            },
-            {
-                "name": "生成字段建议",
-                "scenario": "把一句话需求变成可编辑、可机器读取的 6 要素字段草稿。",
-                "command": "python3 scripts/generate_goal.py --suggest-fields '给项目加单元测试'",
-            },
-            {
-                "name": "校验字段 JSON",
-                "scenario": "人工或工具编辑 6 要素字段 JSON 后，先确认可以安全交给 --generate --from-json。",
-                "command": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
-            },
-            {
-                "name": "解释缺失要素",
-                "scenario": "不只想知道缺什么，还想知道为什么缺、优先补什么和怎么补。",
-                "command": "python3 scripts/generate_goal.py --explain-missing '给项目加单元测试'",
-            },
-            {
-                "name": "生成 Markdown 模板",
-                "scenario": "把内置任务模板贴到 PR、Issue 或需求文档，方便需求方按 6 要素补信息。",
-                "command": "python3 scripts/generate_goal.py --template-md refactor",
-            },
-            {
-                "name": "从 JSON 生成 /goal",
-                "scenario": "自动化系统已保存 6 要素，希望避免展开多个 CLI 参数。",
-                "command": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
-            },
-            {
-                "name": "生成可编辑草稿",
-                "scenario": "只有一句话需求时，先生成带默认填充提示的 /goal 草稿供人工复核。",
-                "command": "python3 scripts/generate_goal.py --draft '给项目加单元测试'",
-            },
-            {
-                "name": "校验已有 /goal 文件",
-                "scenario": "手工编辑或批量拼接后，需要确认分隔线、5 段结构和 6 要素提示仍完整。",
-                "command": "python3 scripts/generate_goal.py --validate-goal-file goal.txt",
-            },
-        ],
-        "batch": [
-            {
-                "name": "批量 dry-run",
-                "scenario": "从任务清单检查每个任务的要素完整度，不生成 /goal。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run",
-            },
-            {
-                "name": "CI 校验清单",
-                "scenario": "交付前阻止缺失要素任务进入执行阶段。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --check --report-json batch_report.json",
-            },
-            {
-                "name": "预览任务范围",
-                "scenario": "配置 filter/sort/limit 后先确认将处理哪些任务。",
-                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --list-tasks --filter '测试|Bug' --sort-by name",
-            },
-        ],
-    }
 
 
 def get_task_template(template_id: str) -> dict[str, object]:
