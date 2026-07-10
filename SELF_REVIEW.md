@@ -15,3 +15,17 @@
 ### 本轮总结
 
 发现 5 个问题，修复 5 个，跳过 0 个。
+
+## 第 2 轮
+
+### 发现的问题
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/batch_generate.py::_description_fallback | 批量任务从 description 推断到某个要素存在时，会把整段 description 填入该要素；服务层单元测试示例因此把目标、验证、边界、迭代和受阻内容重复塞进 Outcome/Verification，生成的 /goal 可读性差且容易误导执行者。 | 待处理 | TBD |
+| 2 | P1 | scripts/generate_goal.py::_needs_report | 报告需求识别只覆盖中文“报告/文档”和 README，无法识别 `OPTIMIZE_REPORT.md` 这类英文报告文件名；用户明确要求生成报告时仍会输出“不需要额外报告”。 | 待处理 | TBD |
+| 3 | P1 | scripts/generate_goal.py::_commit_examples | commit 示例只从 Outcome 中取路径，若 Outcome 提到报告文件而边界里才有代码目录，示例会优先落到报告文件，不能反映真实改动范围。 | 待处理 | TBD |
+
+### 本轮总结
+
+发现 3 个问题，修复 0 个，跳过 0 个。
