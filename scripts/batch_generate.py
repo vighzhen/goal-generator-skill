@@ -109,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.questions:
+        return _run_batch_questions_mode(tasks, args, start_time)
     if args.redaction_check:
         return _run_batch_redaction_check_mode(tasks, args, start_time)
     if args.lint_fields:
@@ -164,6 +166,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
+    parser.add_argument("--questions", action="store_true", help="按任务生成可直接发送的批量缺失要素追问文案。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -270,6 +273,197 @@ def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
+
+
+def _run_batch_questions_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--questions 不支持 --output-dir，请使用 --output-file 写入追问文案。", file=sys.stderr)
+        return 1
+    question_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    question_report = _build_batch_question_report(question_tasks)
+    question_text = _format_batch_question_report(question_report)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(question_text, Path(args.output_file))
+    elif not summary_only:
+        print(question_text)
+    elapsed_seconds = time.perf_counter() - start_time
+    if args.report_json:
+        _write_batch_question_report(question_report, skipped_tasks, elapsed_seconds, Path(args.report_json))
+    print(_format_questions_summary(question_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and (question_report["needs_input_count"] or skipped_tasks):
+        return 1
+    return 0
+
+
+def _build_batch_question_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_reports = [_task_question_report(task) for task in tasks]
+    ready_count = sum(1 for report in task_reports if report["ready_to_generate"])
+    input_error_count = sum(1 for report in task_reports if report["input_error"])
+    question_count = sum(len(report["questions"]) for report in task_reports)
+    return {
+        "all_ready": ready_count == len(task_reports),
+        "task_count": len(task_reports),
+        "ready_count": ready_count,
+        "needs_input_count": len(task_reports) - ready_count,
+        "input_error_count": input_error_count,
+        "question_count": question_count,
+        "tasks": task_reports,
+    }
+
+
+def _task_question_report(task: TaskSpec) -> dict[str, object]:
+    if task.load_error:
+        return _input_error_question_report(task.name, task.description, task.load_error)
+    values, field_sources = _task_question_field_values(task)
+    missing_fields = _missing_keys(values)
+    input_error = "" if task.description else "缺少 description"
+    questions = _task_input_questions(input_error) + [_field_question_entry(key) for key in missing_fields]
+    return {
+        "name": task.name,
+        "description": task.description,
+        "ready_to_generate": not input_error and not missing_fields,
+        "input_error": input_error,
+        "present_fields": [key for key in ELEMENT_ORDER if key not in missing_fields],
+        "missing_fields": missing_fields,
+        "field_sources": field_sources,
+        "questions": questions,
+        "summary": _task_question_summary(input_error, missing_fields),
+    }
+
+
+def _input_error_question_report(task_name: str, description: str, reason: str) -> dict[str, object]:
+    return {
+        "name": task_name,
+        "description": description,
+        "ready_to_generate": False,
+        "input_error": reason,
+        "present_fields": [],
+        "missing_fields": list(ELEMENT_ORDER),
+        "field_sources": {key: "missing" for key in ELEMENT_ORDER},
+        "questions": [
+            {
+                "element": "task",
+                "label": "任务输入",
+                "question": f"请先修复任务输入：{reason}",
+                "example": _skip_suggestion(reason),
+            }
+        ],
+        "summary": f"任务输入无效：{reason}",
+    }
+
+
+def _task_question_field_values(task: TaskSpec) -> tuple[dict[str, str], dict[str, str]]:
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {key: "missing" for key in ELEMENT_ORDER}
+    if task.description:
+        analysis = analyze_description(task.description)
+        description_fields = _extract_labeled_fields(task.description)
+        values.update(description_fields)
+        for key in description_fields:
+            sources[key] = "description_label"
+        _merge_lint_description_present(values, sources, task.description, list(analysis["present"].keys()))
+    for key, value in task.fields.items():
+        if value:
+            values[key] = value
+            sources[key] = "fields"
+    return values, sources
+
+
+def _task_input_questions(input_error: str) -> list[dict[str, str]]:
+    if not input_error:
+        return []
+    return [
+        {
+            "element": "description",
+            "label": "任务描述（description）",
+            "question": "请补充 description 字段，说明编码目标和上下文。",
+            "example": "示例：为 src/services/payment.py 补齐 pytest 单元测试，并说明验证命令和约束。",
+        }
+    ]
+
+
+def _field_question_entry(key: str) -> dict[str, str]:
+    return {
+        "element": key,
+        "label": ELEMENT_LABELS[key],
+        "question": f"请补充 {ELEMENT_LABELS[key]}。",
+        "example": QUESTION_EXAMPLES[key],
+    }
+
+
+def _task_question_summary(input_error: str, missing_fields: list[str]) -> str:
+    if input_error:
+        return f"任务输入需修复：{input_error}"
+    if not missing_fields:
+        return "6 要素已具备，无需追问。"
+    return f"需补充 {len(missing_fields)} 个要素：{_format_labels(missing_fields)}。"
+
+
+def _format_batch_question_report(question_report: dict[str, object]) -> str:
+    task_reports = question_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        return "批量缺失信息追问：\n无可追问任务。"
+    if question_report.get("all_ready"):
+        return "批量缺失信息追问：\n所有任务都已具备 6 要素，无需追问。"
+    lines = ["批量缺失信息追问：", ""]
+    for task_report in task_reports:
+        if not isinstance(task_report, dict) or task_report.get("ready_to_generate"):
+            continue
+        lines.extend(_format_task_question_block(task_report))
+    lines.append("你可以让需求方按任务名逐条简短回答，我会把补充内容合并成完整 /goal 指令。")
+    return "\n".join(lines)
+
+
+def _format_task_question_block(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    lines = [f"任务：{name}"]
+    description = str(task_report.get("description", "")).strip()
+    if description:
+        lines.append(f"当前描述：{description[:160]}")
+    lines.append("请补充以下信息：")
+    questions = task_report.get("questions", [])
+    if isinstance(questions, list):
+        for index, question in enumerate(questions, start=1):
+            if isinstance(question, dict):
+                lines.append(f"{index}. {question.get('label', '缺失信息')}：{question.get('example', '')}")
+    lines.append("")
+    return lines
+
+
+def _write_text_file(content: str, output_file: Path) -> None:
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(f"{content}\n", encoding="utf-8")
+    print(f"已写入：{output_file}")
+
+
+def _write_batch_question_report(
+    question_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    elapsed_seconds: float,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": question_report["ready_count"],
+        "skipped_count": question_report["needs_input_count"] + len(skipped_tasks),
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "questions": question_report,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_questions_summary(question_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "追问文案生成完成："
+        f"无需追问 {question_report.get('ready_count', 0)} 个，"
+        f"需补充 {question_report.get('needs_input_count', 0)} 个，"
+        f"问题 {question_report.get('question_count', 0)} 条，"
+        f"输入错误 {question_report.get('input_error_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
 
 
 def _run_dependency_plan_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
