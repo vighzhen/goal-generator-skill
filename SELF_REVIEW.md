@@ -220,7 +220,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量字段语义质量门禁 | 团队维护 JSON/CSV 批量任务清单时，单任务 `--lint-fields-json` 只能检查一个字段文件，无法在提交前一次性发现多个任务中“字段完整但空泛”或缺失字段的问题；现有 `--dry-run` 只看完整度和默认填充，不能阻止低质量批量 `/goal`。 | 在 `scripts/batch_generate.py` 新增 `--lint-fields` 模式，复用单任务语义质量规则，按任务汇总字段来源、分数、问题和退出码；支持 `--filter`/`--limit`/`--dedupe`/`--summary-only`/`--report-json`，同步更新 README 和 SKILL。 | 待实现 | 待回填 |
+| 1 | 批量字段语义质量门禁 | 团队维护 JSON/CSV 批量任务清单时，单任务 `--lint-fields-json` 只能检查一个字段文件，无法在提交前一次性发现多个任务中“字段完整但空泛”或缺失字段的问题；现有 `--dry-run` 只看完整度和默认填充，不能阻止低质量批量 `/goal`。 | 在 `scripts/batch_generate.py` 新增 `--lint-fields` 模式，复用单任务语义质量规则，按任务汇总字段来源、分数、问题和退出码；支持 `--filter`/`--limit`/`--dedupe`/`--summary-only`/`--report-json`，同步更新 README 和 SKILL。 | 已实现 | 076b450 |
 
 #### 去重审查
 
@@ -238,7 +238,7 @@
 
 ### 本轮总结
 
-进行中：已完成第 7 轮审查清单，计划实现 1 个批量字段语义质量门禁功能。
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py /tmp/batch_lint_good.json --lint-fields --report-json /tmp/batch_lint_good_report.json`、含空泛字段批量任务的 `--lint-fields` 失败退出码与报告断言、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
 ## 用户纠正记录
 
@@ -248,7 +248,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 7 轮；累计修复 2 个问题，新增 6 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 7 轮，准备进入第 8 轮；累计修复 2 个问题，新增 7 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -257,4 +257,5 @@
 - 第 4 轮：原始需求与补充回答合并（d49a240）
 - 第 5 轮：6 要素语义质量检查（9042f35）
 - 第 6 轮：项目验证命令发现（67fad6c）
-剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划依赖用户显式填写准确任务名；英文识别、上下文合并和语义质量检查均为启发式规则，复杂长句、领域缩写、多意图补充或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段和质量门禁结论。
+- 第 7 轮：批量字段语义质量门禁（076b450）
+剩余风险：路径扫描与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量依赖计划依赖用户显式填写准确任务名；英文识别、上下文合并、单任务和批量语义质量检查均为启发式规则，复杂长句、领域缩写、多意图补充或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段和质量门禁结论。
