@@ -117,14 +117,18 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.dedupe, default_values, args.verbose)
-    _write_outputs(outputs, args.output_dir, args.output_file, args.summary_only)
+    dry_run = args.dry_run or args.check
+    strict = args.strict or args.check
+    summary_only = args.summary_only or args.check
+    fail_on_skipped = args.fail_on_skipped or args.check
+    outputs, skipped_tasks = _process_tasks(tasks, dry_run, strict, args.dedupe, default_values, args.verbose)
+    _write_outputs(outputs, args.output_dir, args.output_file, summary_only)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
     if args.report_json:
         _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json))
     print(_format_summary(stats))
-    if args.fail_on_skipped and stats.skipped_count:
+    if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
 
@@ -145,6 +149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
+    parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
