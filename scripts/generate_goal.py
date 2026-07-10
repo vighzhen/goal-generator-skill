@@ -806,6 +806,132 @@ def _goal_json_recommended_commands(review_required: list[str]) -> dict[str, str
     }
 
 
+def _numeric_profile_value(profile: dict[str, object], key: str) -> int:
+    value = profile.get(key, 0)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return 0
+
+
+def _readiness_score(missing: list[str], profile: dict[str, object], risk_score: int) -> int:
+    missing_penalty = len(missing) * 14
+    risk_penalty = min(risk_score // 4, 25)
+    complexity_penalty = _complexity_penalty(profile)
+    return max(0, min(100, 100 - missing_penalty - risk_penalty - complexity_penalty))
+
+
+def _complexity_penalty(profile: dict[str, object]) -> int:
+    complexity = profile.get("complexity", {})
+    level = complexity.get("level", "low") if isinstance(complexity, dict) else "low"
+    if level == "high":
+        return 10
+    if level == "medium":
+        return 5
+    return 0
+
+
+def _readiness_level(score: int) -> str:
+    if score >= 85:
+        return "ready"
+    if score >= 65:
+        return "needs_review"
+    if score >= 40:
+        return "incomplete"
+    return "high_risk"
+
+
+def _readiness_reasons(missing: list[str], profile: dict[str, object], risk_score: int) -> list[str]:
+    reasons: list[str] = []
+    if missing:
+        reasons.append(f"缺失 {len(missing)} 个必要要素：{_labels_for_keys(missing)}")
+    else:
+        reasons.append("6 个必要要素均已识别")
+    if risk_score:
+        reasons.append(f"任务风险评分为 {risk_score}，风险等级为 {profile.get('risk_level', 'unknown')}")
+    complexity = profile.get("complexity", {})
+    if isinstance(complexity, dict):
+        level = complexity.get("level", "unknown")
+        complexity_reasons = complexity.get("reasons", [])
+        if isinstance(complexity_reasons, list):
+            reasons.append(f"复杂度为 {level}：{'；'.join(str(reason) for reason in complexity_reasons)}")
+    return reasons
+
+
+def _labels_for_keys(keys: list[str]) -> str:
+    return "、".join(ELEMENT_LABELS[key] for key in keys)
+
+
+def _readiness_next_action(level: str, missing: list[str]) -> str:
+    if level == "ready":
+        return "可以进入 --generate；仍建议人工快速复核边界、验证命令和受阻条件。"
+    if level == "needs_review":
+        return "建议先复核风险和缺失项，再补齐少量关键信息后生成 /goal。"
+    labels = _labels_for_keys(missing) if missing else "风险项"
+    return f"先补齐或确认：{labels}；可使用 --explain-missing 生成可发送的追问文案。"
+
+
+def _readiness_recommended_command(level: str) -> str:
+    if level == "ready":
+        return "python3 scripts/generate_goal.py --generate ..."
+    return "python3 scripts/generate_goal.py --explain-missing '<任务描述>'"
+
+
+def suggest_goal_fields(description: str) -> dict[str, object]:
+    """从任务描述生成可编辑、可机器读取的 6 要素字段建议。"""
+    if not description.strip():
+        raise ValueError("--suggest-fields 不能为空，请提供任务描述")
+    field_values = _extract_labeled_fields(description)
+    analysis = analyze_description(description)
+    _merge_present_fallbacks(field_values, description, analysis)
+    profile = build_task_profile(description)
+    recommendations = _recommended_field_mapping(profile)
+    fields: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for key in ELEMENT_ORDER:
+        value = field_values.get(key)
+        if value:
+            fields[key] = value
+            sources[key] = "input_or_detected"
+            continue
+        fields[key] = str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]))
+        sources[key] = "recommended_direction"
+    return {
+        "fields": fields,
+        "sources": sources,
+        "missing": analysis["missing"],
+        "present": analysis["present"],
+        "task_type": profile.get("task_type", {}),
+        "score": score_description(description),
+        "note": "sources 为 recommended_direction 的字段是补全方向，不是用户确认后的最终事实；执行 --generate 前请按真实项目情况编辑。",
+    }
+
+
+def explain_missing_elements(description: str) -> dict[str, object]:
+    """解释任务描述缺失哪些 /goal 要素以及如何一次性补齐。"""
+    if not description.strip():
+        raise ValueError("--explain-missing 不能为空，请提供任务描述")
+    analysis = analyze_description(description)
+    profile = build_task_profile(description)
+    recommendations = _recommended_field_mapping(profile)
+    missing = _prioritized_missing_keys(analysis["missing"])
+    return {
+        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
+        "task_type": profile.get("task_type", {}),
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": profile.get("risk_score", 0),
+        "missing_count": len(missing),
+        "present": analysis["present"],
+        "missing_details": [
+            _missing_detail(key, recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]), index)
+            for index, key in enumerate(missing, start=1)
+        ],
+        "ask_strategy": profile.get("ask_strategy", ""),
+        "next_prompt": format_question_prompt(description),
+    }
+
+
 def check_redaction(description: str) -> dict[str, object]:
     """检查任务描述中可能需要脱敏的敏感片段。"""
     if not description.strip():
