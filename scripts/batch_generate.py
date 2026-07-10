@@ -38,6 +38,7 @@ DEFAULTS_JSON_ENV = "GOAL_GENERATOR_DEFAULTS_JSON"
 CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
 DEPENDENCY_SPLIT_PATTERN = re.compile(r"[,;，；、\n]+")
 BATCH_INSPECT_PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
+RISK_LEVEL_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
     "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容"),
@@ -114,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     start_time = time.perf_counter()
     if args.fail_on_high_risk and not args.profile_tasks:
         print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
+        return 1
+    if args.fail_on_risk_level and not args.profile_tasks:
+        print("--fail-on-risk-level 仅适用于 --profile-tasks。", file=sys.stderr)
         return 1
     if args.lint_defaults_json:
         if args.lint_output:
@@ -246,6 +250,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--fail-on-high-risk", action="store_true", help="配合 --profile-tasks，高风险任务存在时以退出码 1 结束。")
+    parser.add_argument(
+        "--fail-on-risk-level",
+        choices=tuple(RISK_LEVEL_ORDER),
+        help="配合 --profile-tasks，存在指定风险等级及以上任务时以退出码 1 结束。",
+    )
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
     parser.add_argument("--profile-tasks", action="store_true", help="批量识别任务类型、复杂度、风险和 6 要素缺口。")
@@ -456,7 +465,8 @@ def _run_batch_profile_mode(tasks: list[TaskSpec], args: argparse.Namespace, sta
         print("--profile-tasks 不支持 --output-dir，请使用 --output-file 写入画像文本。", file=sys.stderr)
         return 1
     profile_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
-    profile_report = _build_batch_profile_report(profile_tasks)
+    risk_threshold = _profile_risk_threshold(args)
+    profile_report = _build_batch_profile_report(profile_tasks, risk_threshold)
     profile_text = _format_batch_profile_report(profile_report)
     summary_only = args.summary_only or args.check
     if args.output_file:
@@ -470,14 +480,23 @@ def _run_batch_profile_mode(tasks: list[TaskSpec], args: argparse.Namespace, sta
         _write_batch_profile_report(profile_report, skipped_tasks, stats, Path(args.report_json))
     print(_format_batch_profile_summary(profile_report, len(skipped_tasks), elapsed_seconds))
     fail_on_skipped = args.fail_on_skipped or args.check
-    if args.fail_on_high_risk and int(profile_report["high_risk_count"]):
+    risk_gate = profile_report.get("risk_gate", {})
+    if isinstance(risk_gate, dict) and risk_gate.get("enabled") and not risk_gate.get("passed", True):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
 
 
-def _build_batch_profile_report(tasks: list[TaskSpec]) -> dict[str, object]:
+def _profile_risk_threshold(args: argparse.Namespace) -> str:
+    if args.fail_on_risk_level:
+        return str(args.fail_on_risk_level)
+    if args.fail_on_high_risk:
+        return "high"
+    return ""
+
+
+def _build_batch_profile_report(tasks: list[TaskSpec], risk_threshold: str = "") -> dict[str, object]:
     task_reports = [_task_profile_report(task) for task in tasks]
     profiled_reports = [report for report in task_reports if not report["input_error"]]
     return {
@@ -488,8 +507,56 @@ def _build_batch_profile_report(tasks: list[TaskSpec]) -> dict[str, object]:
         "task_type_counts": _batch_profile_task_type_counts(profiled_reports),
         "complexity_counts": _batch_profile_value_counts(profiled_reports, "complexity_level"),
         "risk_level_counts": _batch_profile_value_counts(profiled_reports, "risk_level"),
+        "risk_gate": _batch_profile_risk_gate(profiled_reports, risk_threshold),
         "tasks": task_reports,
     }
+
+
+def _batch_profile_risk_gate(task_reports: list[dict[str, object]], threshold: str) -> dict[str, object]:
+    if not threshold:
+        return {
+            "enabled": False,
+            "threshold": "",
+            "failed_count": 0,
+            "failed_tasks": [],
+            "passed": True,
+            "summary": "未启用风险阈值门禁。",
+        }
+    failed_tasks = [
+        _risk_gate_task_entry(report)
+        for report in task_reports
+        if _risk_level_matches_threshold(str(report.get("risk_level", "unknown")), threshold)
+    ]
+    return {
+        "enabled": True,
+        "threshold": threshold,
+        "failed_count": len(failed_tasks),
+        "failed_tasks": failed_tasks,
+        "passed": not failed_tasks,
+        "summary": _risk_gate_summary(threshold, len(failed_tasks)),
+    }
+
+
+def _risk_gate_task_entry(task_report: dict[str, object]) -> dict[str, object]:
+    return {
+        "name": str(task_report.get("name", "未知任务")),
+        "risk_level": str(task_report.get("risk_level", "unknown")),
+        "risk_score": task_report.get("risk_score", 0),
+    }
+
+
+def _risk_level_matches_threshold(risk_level: str, threshold: str) -> bool:
+    level_value = RISK_LEVEL_ORDER.get(risk_level)
+    threshold_value = RISK_LEVEL_ORDER.get(threshold)
+    if level_value is None or threshold_value is None:
+        return False
+    return level_value >= threshold_value
+
+
+def _risk_gate_summary(threshold: str, failed_count: int) -> str:
+    if failed_count:
+        return f"风险阈值门禁未通过：存在 {failed_count} 个 {threshold} 及以上风险任务。"
+    return f"风险阈值门禁通过：未发现 {threshold} 及以上风险任务。"
 
 
 def _task_profile_report(task: TaskSpec) -> dict[str, object]:
@@ -604,6 +671,7 @@ def _format_batch_profile_report(profile_report: dict[str, object]) -> str:
         f"任务类型分布：{_format_profile_count_entries(profile_report.get('task_type_counts', []), 'label')}",
         f"复杂度分布：{_format_profile_count_entries(profile_report.get('complexity_counts', []), 'id')}",
         f"风险分布：{_format_profile_count_entries(profile_report.get('risk_level_counts', []), 'id')}",
+        _format_profile_risk_gate(profile_report.get("risk_gate", {})),
         "",
     ]
     for task_report in task_reports:
@@ -623,6 +691,15 @@ def _format_profile_count_entries(entries: object, label_key: str) -> str:
         label = str(entry.get(label_key, entry.get("id", "unknown")))
         parts.append(f"{label} {entry.get('count', 0)} 个")
     return "、".join(parts) if parts else "无"
+
+
+def _format_profile_risk_gate(risk_gate: object) -> str:
+    if not isinstance(risk_gate, dict) or not risk_gate.get("enabled"):
+        return "风险阈值门禁：未启用"
+    threshold = risk_gate.get("threshold", "unknown")
+    failed_count = risk_gate.get("failed_count", 0)
+    status = "通过" if risk_gate.get("passed", True) else "未通过"
+    return f"风险阈值门禁：阈值 {threshold} 及以上，命中 {failed_count} 个，{status}"
 
 
 def _format_task_profile_lines(task_report: dict[str, object]) -> list[str]:
@@ -655,11 +732,19 @@ def _write_batch_profile_report(
 
 
 def _format_batch_profile_summary(profile_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    risk_gate = profile_report.get("risk_gate", {})
+    risk_gate_text = ""
+    if isinstance(risk_gate, dict) and risk_gate.get("enabled"):
+        risk_gate_text = (
+            f"风险阈值 {risk_gate.get('threshold', 'unknown')} 及以上命中 "
+            f"{risk_gate.get('failed_count', 0)} 个，"
+        )
     return (
         "画像生成完成："
         f"已画像 {profile_report.get('profiled_count', 0)} 个，"
         f"输入错误 {profile_report.get('input_error_count', 0)} 个，"
         f"高风险 {profile_report.get('high_risk_count', 0)} 个，"
+        f"{risk_gate_text}"
         f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
     )
 
