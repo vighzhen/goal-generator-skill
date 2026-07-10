@@ -507,6 +507,7 @@ def build_capabilities() -> dict[str, object]:
                 "--score-summary",
                 "--score-report-md",
                 "--review-board-md",
+                "--questions-md",
                 "--fail-below-score",
                 "--export-fields-json",
                 "--dedupe",
@@ -632,6 +633,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量评审看板",
                 "scenario": "团队希望按 ready/needs_review/incomplete/high_risk 分组评审任务清单。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --review-board-md review_board.md",
+            },
+            {
+                "name": "批量追问 Markdown 包",
+                "scenario": "团队希望把每个任务需要补的信息整理成可直接发送给需求方的追问文案。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --questions-md questions.md",
             },
             {
                 "name": "批量可执行度门禁",
