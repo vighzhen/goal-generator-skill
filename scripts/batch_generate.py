@@ -118,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         min_lint_score = _min_lint_score_from_args(args)
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
         required_explicit_fields = _required_explicit_fields_from_args(args)
+        forbidden_default_fields = _forbidden_default_fields_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -204,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         args.verbose,
         max_defaulted_fields,
         required_explicit_fields,
+        forbidden_default_fields,
     )
     output_lint_report = None
     if args.lint_output:
@@ -249,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
     if max_defaulted_fields is not None and _has_defaulted_limit_skips(skipped_tasks):
         return 1
     if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
+        return 1
+    if forbidden_default_fields and _has_forbidden_default_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -299,6 +303,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-explicit-fields",
         help="真实生成、dry-run、check 或 lint-output 时要求指定 6 要素必须由 fields 或 description 标签显式提供，多个字段用逗号分隔。",
+    )
+    parser.add_argument(
+        "--forbid-default-fields",
+        help="真实生成、dry-run、check 或 lint-output 时禁止指定 6 要素使用默认值兜底，多个字段用逗号分隔。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -367,10 +375,34 @@ def _required_explicit_fields_from_args(args: argparse.Namespace) -> list[str]:
         or args.list_tasks
     ):
         raise ValueError("--require-explicit-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return _field_list_from_value(required_fields_value, "--require-explicit-fields")
+
+
+def _forbidden_default_fields_from_args(args: argparse.Namespace) -> list[str]:
+    forbidden_fields_value = args.forbid_default_fields
+    if not forbidden_fields_value:
+        return []
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--forbid-default-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return _field_list_from_value(forbidden_fields_value, "--forbid-default-fields")
+
+
+def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
     fields: list[str] = []
     seen: set[str] = set()
     unknown_tokens: list[str] = []
-    for raw_token in DEPENDENCY_SPLIT_PATTERN.split(required_fields_value):
+    for raw_token in DEPENDENCY_SPLIT_PATTERN.split(field_list_value):
         token = raw_token.strip()
         if not token:
             continue
@@ -383,9 +415,9 @@ def _required_explicit_fields_from_args(args: argparse.Namespace) -> list[str]:
             seen.add(field)
     if unknown_tokens:
         supported = "、".join(ELEMENT_ORDER)
-        raise ValueError(f"--require-explicit-fields 包含未知字段：{'、'.join(unknown_tokens)}；可选：{supported}")
+        raise ValueError(f"{option_name} 包含未知字段：{'、'.join(unknown_tokens)}；可选：{supported}")
     if not fields:
-        raise ValueError("--require-explicit-fields 必须包含至少一个 6 要素字段")
+        raise ValueError(f"{option_name} 必须包含至少一个 6 要素字段")
     return fields
 
 
@@ -2542,6 +2574,7 @@ def _process_tasks(
     verbose: bool,
     max_defaulted_fields: int | None = None,
     required_explicit_fields: list[str] | None = None,
+    forbidden_default_fields: list[str] | None = None,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2563,6 +2596,7 @@ def _process_tasks(
                 verbose,
                 max_defaulted_fields,
                 required_explicit_fields or [],
+                forbidden_default_fields or [],
             )
             outputs.append(output)
         except (ValueError, OSError) as error:
@@ -2592,6 +2626,8 @@ def _skip_suggestion(reason: str) -> str:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
         return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
+    if "禁止默认兜底要素" in reason:
+        return "在任务 fields 中填写这些要素，或在 description 中补充可被识别的明确字段内容。"
     if "缺少显式要素" in reason:
         return "在任务 fields 中填写这些要素，或在 description 中使用字段标签显式写出对应内容。"
     if "必须是对象" in reason:
@@ -2613,6 +2649,7 @@ def _process_one_task(
     verbose: bool,
     max_defaulted_fields: int | None = None,
     required_explicit_fields: list[str] | None = None,
+    forbidden_default_fields: list[str] | None = None,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
@@ -2624,6 +2661,9 @@ def _process_one_task(
     prepared = _prepare_task(task, strict, default_values)
     if max_defaulted_fields is not None and len(prepared.defaulted_keys) > max_defaulted_fields:
         raise ValueError(_defaulted_limit_error(prepared.defaulted_keys, max_defaulted_fields))
+    forbidden_defaults = _forbidden_defaulted_fields(prepared.defaulted_keys, forbidden_default_fields or [])
+    if forbidden_defaults:
+        raise ValueError(_forbidden_default_fields_error(forbidden_defaults))
     content = _format_dry_run(prepared) if dry_run else _format_goal_output(prepared)
     slug = _unique_slug(task.name, index, used_slugs)
     if verbose:
@@ -2648,6 +2688,21 @@ def _defaulted_limit_error(defaulted_keys: list[str], max_defaulted_fields: int)
 
 def _has_defaulted_limit_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("超过 --max-defaulted-fields" in skipped.reason for skipped in skipped_tasks)
+
+
+def _forbidden_defaulted_fields(defaulted_keys: list[str], forbidden_fields: list[str]) -> list[str]:
+    if not forbidden_fields:
+        return []
+    defaulted_set = set(defaulted_keys)
+    return [key for key in forbidden_fields if key in defaulted_set]
+
+
+def _forbidden_default_fields_error(forbidden_defaults: list[str]) -> str:
+    return f"禁止默认兜底要素：{_format_labels(forbidden_defaults)}；--forbid-default-fields 要求这些字段不能使用默认值"
+
+
+def _has_forbidden_default_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("禁止默认兜底要素" in skipped.reason for skipped in skipped_tasks)
 
 
 def _missing_explicit_fields(task: TaskSpec, required_fields: list[str]) -> list[str]:
