@@ -59,6 +59,14 @@ python3 scripts/generate_goal.py --profile "修复登录 API 在空 token 场景
 python3 scripts/generate_goal.py --questions "我要让 Codex 帮我给项目加单元测试"
 ```
 
+### 写入文件
+
+单任务命令可追加 `--output-file`，把分析、画像、追问文案或完整 `/goal` 指令写入文件，避免长文本复制丢失：
+
+```bash
+python3 scripts/generate_goal.py --questions "我要让 Codex 帮我给项目加单元测试" --output-file questions.txt
+```
+
 ### 生成完整 /goal 指令
 
 当 6 个要素都已明确时，使用 `--generate` 传入字段并生成可复制的 `/goal` 指令纯文本：
@@ -165,5 +173,6 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量任务指令生成（JSON、CSV、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
 - 一键生成可复制的缺失要素追问文案
+- 单任务 analyze/profile/questions/generate 输出写入文件
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。

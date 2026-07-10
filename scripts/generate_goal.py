@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TypedDict
 
 ELEMENT_ORDER: tuple[str, ...] = (
@@ -309,19 +310,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.profile:
-            print(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2))
+            _emit_output(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2), args.output_file)
             return 0
         if args.questions:
-            print(format_question_prompt(args.questions))
+            _emit_output(format_question_prompt(args.questions), args.output_file)
             return 0
         if args.analyze:
-            print(json.dumps(analyze_description(args.analyze), ensure_ascii=False, indent=2))
+            _emit_output(json.dumps(analyze_description(args.analyze), ensure_ascii=False, indent=2), args.output_file)
             return 0
         if args.generate:
-            print(render_goal_text(_goal_from_args(args)))
+            _emit_output(render_goal_text(_goal_from_args(args)), args.output_file)
             return 0
         if args.interactive:
-            return _run_interactive()
+            return _run_interactive(args.output_file)
     except ValueError as error:
         print(f"参数错误：{error}", file=sys.stderr)
         return 2
@@ -336,6 +337,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
+    parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
     parser.add_argument("--verification", help="Verification Surface（验证方式）。")
     parser.add_argument("--constraints", help="Constraints（约束）。")
@@ -343,6 +345,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iteration", help="Iteration Policy（迭代策略）。")
     parser.add_argument("--blocked", help="Blocked Stop Condition（受阻停止条件）。")
     return parser
+
+
+def _emit_output(content: str, output_file: str | None) -> None:
+    if not output_file:
+        print(content)
+        return
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(f"{content}\n", encoding="utf-8")
+    print(f"已写入：{output_path}")
 
 
 def build_task_profile(description: str) -> dict[str, object]:
@@ -416,7 +428,7 @@ def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
     )
 
 
-def _run_interactive() -> int:
+def _run_interactive(output_file: str | None = None) -> int:
     field_values: dict[str, str] = {}
     try:
         combined_text = input("请输入编码任务描述：").strip()
@@ -429,7 +441,7 @@ def _run_interactive() -> int:
             _merge_present_fallbacks(field_values, combined_text, analysis)
             missing = _missing_field_keys(field_values)
             if not missing:
-                print(render_goal_text(_fields_from_mapping(field_values)))
+                _emit_output(render_goal_text(_fields_from_mapping(field_values)), output_file)
                 return 0
             _print_missing_questions(missing)
             supplement = input("请一次性补充以上信息：").strip()
@@ -439,7 +451,7 @@ def _run_interactive() -> int:
         _merge_present_fallbacks(field_values, combined_text, analyze_description(combined_text))
         defaulted_keys = _apply_interactive_defaults(field_values)
         _print_default_notice(defaulted_keys)
-        print(render_goal_text(_fields_from_mapping(field_values)))
+        _emit_output(render_goal_text(_fields_from_mapping(field_values)), output_file)
         return 0
     except KeyboardInterrupt:
         print("\n已取消交互。", file=sys.stderr)
