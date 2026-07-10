@@ -21,6 +21,7 @@ from generate_goal import (
     _extract_labeled_fields,
     analyze_description,
     check_redaction,
+    inspect_path_context,
     lint_goal_text,
     lint_fields_json_data,
     render_goal_text,
@@ -35,6 +36,7 @@ SUMMARY_TEMPLATE = "处理完成：成功 {success_count} 个，跳过 {skipped_
 DEFAULTS_JSON_ENV = "GOAL_GENERATOR_DEFAULTS_JSON"
 CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
 DEPENDENCY_SPLIT_PATTERN = re.compile(r"[,;，；、\n]+")
+BATCH_INSPECT_PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
     "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容"),
@@ -51,6 +53,7 @@ class TaskSpec:
     name: str
     description: str
     fields: dict[str, str]
+    inspect_path: str = ""
     depends_on: list[str] = field(default_factory=list)
     load_error: str = ""
 
@@ -123,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.questions
         or args.redaction_check
         or args.lint_fields
+        or args.inspect_paths
         or args.plan_dependencies
         or args.list_tasks
         or args.dry_run
@@ -142,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_batch_redaction_check_mode(tasks, args, start_time)
     if args.lint_fields:
         return _run_lint_fields_mode(tasks, args, start_time)
+    if args.inspect_paths:
+        return _run_inspect_paths_mode(tasks, args, start_time)
     if args.plan_dependencies:
         return _run_dependency_plan_mode(tasks, args, start_time)
     if args.list_tasks:
@@ -227,6 +233,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lint-output", action="store_true", help="真实生成 /goal 后，在写出交付物前检查每个最终文本的结构和语义质量。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
+    parser.add_argument("--inspect-paths", action="store_true", help="批量扫描任务 path/inspect_path/target_path 指向的本地路径并输出上下文建议。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
@@ -630,6 +637,8 @@ def _merge_input_error(task: TaskSpec, merged_description: str) -> str:
 
 def _merged_task_json(task: TaskSpec, merged_description: str, field_values: dict[str, str]) -> dict[str, object]:
     item: dict[str, object] = {"name": task.name, "description": merged_description}
+    if task.inspect_path:
+        item["inspect_path"] = task.inspect_path
     if task.depends_on:
         item["depends_on"] = task.depends_on
     fields = {key: field_values[key] for key in ELEMENT_ORDER if field_values.get(key)}
@@ -944,6 +953,8 @@ def _task_redaction_text(task: TaskSpec) -> str:
     parts = [f"name: {task.name}"]
     if task.description:
         parts.append(f"description: {task.description}")
+    if task.inspect_path:
+        parts.append(f"inspect_path: {task.inspect_path}")
     for key in ELEMENT_ORDER:
         value = task.fields.get(key)
         if value:
@@ -1145,6 +1156,183 @@ def _format_lint_fields_summary(lint_report: dict[str, object], skipped_count: i
         "字段语义质量检查完成："
         f"通过 {lint_report.get('passed_count', 0)} 个，"
         f"失败 {lint_report.get('failed_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
+
+
+def _run_inspect_paths_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--inspect-paths 不支持 --output-dir，请使用 --output-file 写入扫描报告。", file=sys.stderr)
+        return 1
+    inspect_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    inspection_report = _build_batch_inspection_report(inspect_tasks)
+    report_text = _format_batch_inspection_report(inspection_report)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(report_text, Path(args.output_file))
+    elif not summary_only:
+        print(report_text)
+    elapsed_seconds = time.perf_counter() - start_time
+    failed_count = int(inspection_report["failed_count"])
+    stats = BatchStats(int(inspection_report["passed_count"]), failed_count + len(skipped_tasks), elapsed_seconds)
+    if args.report_json:
+        _write_batch_inspection_report(inspection_report, skipped_tasks, stats, Path(args.report_json))
+    print(_format_inspect_paths_summary(inspection_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if failed_count:
+        return 1
+    if fail_on_skipped and skipped_tasks:
+        return 1
+    return 0
+
+
+def _build_batch_inspection_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_reports = [_task_inspection_report(task) for task in tasks]
+    failed_count = sum(1 for report in task_reports if not report["passed"])
+    return {
+        "valid": failed_count == 0,
+        "task_count": len(task_reports),
+        "passed_count": len(task_reports) - failed_count,
+        "failed_count": failed_count,
+        "tasks": task_reports,
+    }
+
+
+def _task_inspection_report(task: TaskSpec) -> dict[str, object]:
+    if task.load_error:
+        return _failed_task_inspection_report(task, task.load_error, "修复任务输入格式后再扫描路径。")
+    path_value, path_source = _task_inspection_path(task)
+    if not path_value:
+        return _failed_task_inspection_report(
+            task,
+            "缺少 path/inspect_path/target_path，且 description/fields 中未发现可扫描路径",
+            "为该任务补充 path、inspect_path 或 target_path 字段，或在描述中写明真实文件/目录路径。",
+        )
+    try:
+        context = inspect_path_context(path_value, task.description)
+    except (OSError, ValueError) as error:
+        return _failed_task_inspection_report(task, str(error), "确认路径存在且当前进程有权限读取，必要时收窄到具体文件或目录。", path_value, path_source)
+    return {
+        "name": task.name,
+        "passed": True,
+        "inspect_path": path_value,
+        "path_source": path_source,
+        "kind": context.get("kind", "unknown"),
+        "file_count": context.get("file_count", 0),
+        "language_counts": context.get("language_counts", {}),
+        "verification_hints": context.get("verification_hints", []),
+        "risk_flags": context.get("risk_flags", []),
+        "suggested_fields": context.get("suggested_fields", {}),
+        "context": context,
+        "summary": _inspection_task_summary(context),
+    }
+
+
+def _failed_task_inspection_report(
+    task: TaskSpec,
+    reason: str,
+    suggestion: str,
+    path_value: str = "",
+    path_source: str = "missing",
+) -> dict[str, object]:
+    return {
+        "name": task.name,
+        "passed": False,
+        "inspect_path": path_value,
+        "path_source": path_source,
+        "kind": "error",
+        "file_count": 0,
+        "language_counts": {},
+        "verification_hints": [],
+        "risk_flags": [],
+        "suggested_fields": {},
+        "error": reason,
+        "suggestion": suggestion,
+        "summary": f"路径扫描失败：{reason}",
+    }
+
+
+def _task_inspection_path(task: TaskSpec) -> tuple[str, str]:
+    if task.inspect_path:
+        return task.inspect_path, "task.path_alias"
+    combined_text = " ".join(value for value in [task.description, *task.fields.values()] if value)
+    match = BATCH_INSPECT_PATH_PATTERN.search(combined_text)
+    if match:
+        return match.group(1).strip("`"), "description_or_fields"
+    return "", "missing"
+
+
+def _inspection_task_summary(context: dict[str, object]) -> str:
+    path_value = context.get("path", "")
+    file_count = context.get("file_count", 0)
+    verification_count = len(context.get("verification_hints", [])) if isinstance(context.get("verification_hints"), list) else 0
+    return f"路径 {path_value} 扫描通过，发现 {file_count} 个文件，验证建议 {verification_count} 条。"
+
+
+def _format_batch_inspection_report(inspection_report: dict[str, object]) -> str:
+    lines = ["批量路径上下文画像："]
+    task_reports = inspection_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        lines.append("无可扫描任务。")
+        return "\n".join(lines)
+    for task_report in task_reports:
+        if isinstance(task_report, dict):
+            lines.extend(_format_task_inspection_lines(task_report))
+    return "\n".join(lines)
+
+
+def _format_task_inspection_lines(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    status = "通过" if task_report.get("passed") else "失败"
+    lines = [f"- {name}：{status}，路径 {task_report.get('inspect_path') or '未提供'}。"]
+    if not task_report.get("passed"):
+        lines.append(f"  - 原因：{task_report.get('error', '')}")
+        lines.append(f"  - 建议：{task_report.get('suggestion', '')}")
+        return lines
+    lines.append(f"  - 类型：{task_report.get('kind', 'unknown')}；文件数：{task_report.get('file_count', 0)}。")
+    language_counts = task_report.get("language_counts", {})
+    if isinstance(language_counts, dict) and language_counts:
+        language_label = "、".join(f"{language} {count}" for language, count in list(language_counts.items())[:5])
+        lines.append(f"  - 语言分布：{language_label}。")
+    verification_hints = task_report.get("verification_hints", [])
+    if isinstance(verification_hints, list) and verification_hints:
+        lines.append(f"  - 验证建议：{'；'.join(str(hint) for hint in verification_hints[:3])}")
+    risk_flags = task_report.get("risk_flags", [])
+    if isinstance(risk_flags, list) and risk_flags:
+        lines.append(f"  - 风险提示：{'；'.join(str(flag) for flag in risk_flags[:3])}")
+    suggested_fields = task_report.get("suggested_fields", {})
+    if isinstance(suggested_fields, dict) and suggested_fields:
+        outcome = _normalize_description(str(suggested_fields.get("outcome", "")))
+        boundaries = _normalize_description(str(suggested_fields.get("boundaries", "")))
+        if outcome:
+            lines.append(f"  - 建议目标：{outcome[:140]}")
+        if boundaries:
+            lines.append(f"  - 建议边界：{boundaries[:140]}")
+    return lines
+
+
+def _write_batch_inspection_report(
+    inspection_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "path_inspection": inspection_report,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_inspect_paths_summary(inspection_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "路径上下文画像完成："
+        f"通过 {inspection_report.get('passed_count', 0)} 个，"
+        f"失败 {inspection_report.get('failed_count', 0)} 个，"
         f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
     )
 
@@ -1468,8 +1656,9 @@ def _task_from_json_item(item: dict[str, Any], index: int) -> TaskSpec:
     name = _string_value(item.get("name")) or _default_task_name(index)
     description = _string_value(item.get("description"))
     fields = _fields_from_mapping(item.get("fields"))
+    inspect_path = _string_value(item.get("inspect_path") or item.get("path") or item.get("target_path"))
     depends_on = _dependency_names(item.get("depends_on", item.get("dependencies")))
-    return TaskSpec(name=name, description=description, fields=fields, depends_on=depends_on)
+    return TaskSpec(name=name, description=description, fields=fields, inspect_path=inspect_path, depends_on=depends_on)
 
 
 
@@ -1484,8 +1673,15 @@ def _task_from_csv_row(row: dict[str, str | None], index: int) -> TaskSpec:
     name = _string_value(row.get("name")) or _default_task_name(index)
     description = _string_value(row.get("description"))
     fields = {key: _string_value(row.get(key)) for key in ELEMENT_ORDER}
+    inspect_path = _string_value(row.get("inspect_path") or row.get("path") or row.get("target_path"))
     depends_on = _dependency_names(row.get("depends_on") or row.get("dependencies"))
-    return TaskSpec(name=name, description=description, fields=_remove_empty_fields(fields), depends_on=depends_on)
+    return TaskSpec(
+        name=name,
+        description=description,
+        fields=_remove_empty_fields(fields),
+        inspect_path=inspect_path,
+        depends_on=depends_on,
+    )
 
 
 def _dependency_names(raw_dependencies: Any) -> list[str]:
@@ -1843,7 +2039,10 @@ def _write_batch_field_lint_report(
 
 
 def _task_list_report(task: TaskSpec) -> dict[str, object]:
-    return {"name": task.name, "description": task.description, "depends_on": task.depends_on}
+    report: dict[str, object] = {"name": task.name, "description": task.description, "depends_on": task.depends_on}
+    if task.inspect_path:
+        report["inspect_path"] = task.inspect_path
+    return report
 
 
 def _task_report(
