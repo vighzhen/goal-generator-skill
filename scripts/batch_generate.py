@@ -727,7 +727,7 @@ def _skip_suggestion(reason: str) -> str:
     if "必须是对象" in reason:
         return "把该任务改成包含 name、description、fields 的对象。"
     if "不支持的输入格式" in reason:
-        return "改用 .json、.jsonl、.csv、.md 或 .markdown 输入文件。"
+        return f"改用 {'、'.join(SUPPORTED_SUFFIXES)} 输入文件。"
     if "重复任务" in reason:
         return "确认是否确实重复；如需全部保留，请移除 --dedupe。"
     return "检查输入文件格式和任务字段后重试。"
