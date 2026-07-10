@@ -385,6 +385,10 @@ def main(argv: list[str] | None = None) -> int:
             validation = validate_goal_file(args.validate_goal_file)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
+        if args.validate_fields_json:
+            validation = validate_fields_json_file(args.validate_fields_json)
+            _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if validation["valid"] else 1
         if args.draft:
             _emit_output(format_draft_goal(args.draft), args.output_file)
             return 0
@@ -414,6 +418,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
+    parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--draft", help="从一句话描述生成可编辑 /goal 草稿，缺失要素使用默认值并标注。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
@@ -460,6 +465,7 @@ def build_capabilities() -> dict[str, object]:
                 "--capabilities",
                 "--examples",
                 "--validate-goal-file",
+                "--validate-fields-json",
                 "--draft",
                 "--generate",
                 "--interactive",
@@ -528,6 +534,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成字段建议",
                 "scenario": "把一句话需求变成可编辑、可机器读取的 6 要素字段草稿。",
                 "command": "python3 scripts/generate_goal.py --suggest-fields '给项目加单元测试'",
+            },
+            {
+                "name": "校验字段 JSON",
+                "scenario": "人工或工具编辑 6 要素字段 JSON 后，先确认可以安全交给 --generate --from-json。",
+                "command": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
             },
             {
                 "name": "解释缺失要素",
@@ -606,6 +617,131 @@ def validate_goal_file(goal_file: str) -> dict[str, object]:
     """校验已有 /goal 指令文件的结构完整度。"""
     goal_path = Path(goal_file)
     return validate_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def validate_fields_json_file(fields_file: str) -> dict[str, object]:
+    """校验 6 要素 JSON 文件是否适合交给 --generate --from-json。"""
+    fields_path = Path(fields_file)
+    data = json.loads(fields_path.read_text(encoding="utf-8"))
+    return validate_fields_json_data(data, str(fields_path))
+
+
+def validate_fields_json_data(data: object, source: str = "") -> dict[str, object]:
+    """校验直接字段对象或包含 fields 对象的 6 要素 JSON。"""
+    base_report: dict[str, object] = {
+        "valid": False,
+        "source": source,
+        "source_format": "unknown",
+        "missing_fields": [],
+        "empty_fields": [],
+        "unknown_fields": [],
+        "checks": {
+            "json_object": isinstance(data, dict),
+            "fields_object": False,
+            "required_fields_present": {},
+            "required_fields_non_empty": {},
+            "no_unknown_fields": False,
+            "renderable": False,
+        },
+        "normalized_fields": {},
+        "suggestion": "",
+    }
+    if not isinstance(data, dict):
+        base_report["suggestion"] = "JSON 顶层必须是对象，或包含 fields 对象。"
+        return base_report
+
+    raw_fields = data.get("fields", data)
+    source_format = "wrapped_fields" if "fields" in data else "direct_fields"
+    base_report["source_format"] = source_format
+    if not isinstance(raw_fields, dict):
+        base_report["suggestion"] = "fields 必须是对象，或直接提供 6 要素字段对象。"
+        return base_report
+
+    missing_fields, empty_fields, normalized_fields = _inspect_required_fields(raw_fields)
+    unknown_fields = _unknown_field_keys(raw_fields)
+    renderable, render_error = _is_fields_json_renderable(normalized_fields, missing_fields, empty_fields)
+    checks = {
+        "json_object": True,
+        "fields_object": True,
+        "required_fields_present": {key: key not in missing_fields for key in ELEMENT_ORDER},
+        "required_fields_non_empty": {key: key not in missing_fields and key not in empty_fields for key in ELEMENT_ORDER},
+        "no_unknown_fields": not unknown_fields,
+        "renderable": renderable,
+    }
+    valid = not missing_fields and not empty_fields and not unknown_fields and renderable
+    return {
+        "valid": valid,
+        "source": source,
+        "source_format": source_format,
+        "missing_fields": missing_fields,
+        "empty_fields": empty_fields,
+        "unknown_fields": unknown_fields,
+        "checks": checks,
+        "normalized_fields": normalized_fields if valid else {},
+        "render_error": render_error,
+        "suggestion": _fields_json_validation_suggestion(missing_fields, empty_fields, unknown_fields, render_error),
+    }
+
+
+def _inspect_required_fields(raw_fields: dict[object, object]) -> tuple[list[str], list[str], dict[str, str]]:
+    missing_fields: list[str] = []
+    empty_fields: list[str] = []
+    normalized_fields: dict[str, str] = {}
+    for key in ELEMENT_ORDER:
+        if key not in raw_fields:
+            missing_fields.append(key)
+            continue
+        value = "" if raw_fields.get(key) is None else str(raw_fields.get(key)).strip()
+        if not value:
+            empty_fields.append(key)
+            continue
+        normalized_fields[key] = value
+    return missing_fields, empty_fields, normalized_fields
+
+
+def _unknown_field_keys(raw_fields: dict[object, object]) -> list[str]:
+    return sorted(str(key) for key in raw_fields if str(key) not in ELEMENT_ORDER)
+
+
+def _is_fields_json_renderable(
+    normalized_fields: dict[str, str],
+    missing_fields: list[str],
+    empty_fields: list[str],
+) -> tuple[bool, str]:
+    if missing_fields or empty_fields:
+        return False, ""
+    try:
+        render_goal_text(
+            _GoalFields(
+                outcome=normalized_fields["outcome"],
+                verification=normalized_fields["verification"],
+                constraints=normalized_fields["constraints"],
+                boundaries=normalized_fields["boundaries"],
+                iteration=normalized_fields["iteration"],
+                blocked=normalized_fields["blocked"],
+            )
+        )
+    except (KeyError, ValueError) as error:
+        return False, str(error)
+    return True, ""
+
+
+def _fields_json_validation_suggestion(
+    missing_fields: list[str],
+    empty_fields: list[str],
+    unknown_fields: list[str],
+    render_error: str,
+) -> str:
+    suggestions: list[str] = []
+    if missing_fields:
+        suggestions.append(f"补齐缺失字段：{_labels_for_keys(missing_fields)}")
+    if empty_fields:
+        suggestions.append(f"为以下字段填写非空内容：{_labels_for_keys(empty_fields)}")
+    if unknown_fields:
+        suggestions.append(f"移除或移到元数据中的未知字段：{'、'.join(unknown_fields)}")
+    if render_error:
+        suggestions.append(f"修复渲染错误：{render_error}")
+    return "；".join(suggestions) if suggestions else "字段 JSON 完整，可继续执行 --generate --from-json。"
 
 
 def validate_goal_text(goal_text: str, source: str = "") -> dict[str, object]:

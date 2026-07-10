@@ -73,6 +73,16 @@ python3 scripts/generate_goal.py --suggest-fields "给项目加单元测试"
 
 该功能适合 IDE、表单或团队自动化先生成字段草稿，再让人工补齐后交给 `--generate --from-json`。
 
+### 校验 6 要素字段 JSON
+
+使用 `--validate-fields-json` 可在执行 `--generate --from-json` 前检查 JSON 是否包含完整且非空的 6 要素字段、是否存在未知字段，以及是否能正常渲染成 `/goal`：
+
+```bash
+python3 scripts/generate_goal.py --validate-fields-json goal_fields.json
+```
+
+命令支持直接字段对象，也支持 `--suggest-fields` 输出的 `{ "fields": { ... } }` 包装结构；校验通过时退出码为 0，否则退出码为 1 并输出修复建议。
+
 ### 解释缺失要素
 
 使用 `--explain-missing` 可在 `--analyze` 的缺失项基础上进一步输出“为什么缺、优先补什么、推荐怎么填”和可直接发送给用户的追问文案：
@@ -327,6 +337,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 任务类型画像与 6 要素模板推荐
 - 单任务 `/goal` 可执行度评分和下一步建议
 - 单任务可编辑 6 要素字段建议 JSON
+- 单任务 6 要素字段 JSON 质量校验
 - 批量 `/goal` 可执行度评分摘要
 - 批量 `/goal` 可执行度 Markdown 报告
 - 缺失 6 要素的原因解释、优先级和补全建议
