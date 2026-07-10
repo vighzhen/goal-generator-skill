@@ -454,8 +454,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务 Markdown 评审卡片 | 需求评审或 IM 沟通时，用户希望把一个任务的评分、风险、缺失项和下一步追问合成可读 Markdown，而不是分别复制多份 JSON。 | 在 generate_goal.py 新增 --review-card <description>，输出包含可执行度、任务类型、缺失要素、推荐字段和下一步文案的 Markdown。 | 待实现 | - |
-| 2 | 批量 Markdown 评审看板 | 团队批量任务评审时，需要按 ready/needs_review/incomplete/high_risk 分组看任务，而不是在平铺 score-report 中手动筛选。 | 在 batch_generate.py 新增 --review-board-md <path>，按可执行度等级分组输出任务、分数、风险、缺失项和下一步动作。 | 待实现 | - |
+| 1 | 单任务 Markdown 评审卡片 | 需求评审或 IM 沟通时，用户希望把一个任务的评分、风险、缺失项和下一步追问合成可读 Markdown，而不是分别复制多份 JSON。 | 在 generate_goal.py 新增 --review-card <description>，输出包含可执行度、任务类型、缺失要素、推荐字段和下一步文案的 Markdown。 | 已实现 | c24de48 |
+| 2 | 批量 Markdown 评审看板 | 团队批量任务评审时，需要按 ready/needs_review/incomplete/high_risk 分组看任务，而不是在平铺 score-report 中手动筛选。 | 在 batch_generate.py 新增 --review-board-md <path>，按可执行度等级分组输出任务、分数、风险、缺失项和下一步动作。 | 已实现 | 8b07748 |
+
+### 本轮总结
+
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
