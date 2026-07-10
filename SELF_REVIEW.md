@@ -538,12 +538,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务 Goal JSON 草稿 | IDE、机器人或表单希望一次拿到可编辑 6 要素、是否需要人工复核、校验结果和下一步命令；当前 --suggest-fields 偏字段建议，缺少生成前状态和可直接接流水线的包装。 | 在 generate_goal.py 新增 --goal-json <description>，输出 description_preview、fields、sources、review_required、ready_to_generate、validation 和 recommended_commands。 | 待实现 | - |
-| 2 | 批量 Goal JSONL 草稿 | 团队批量清单接入 CI/流水线时，希望把所有任务草稿写成单个 JSONL 产物，便于下游逐行消费；当前 --export-fields-json 会生成多个文件，不利于管道传递。 | 在 batch_generate.py 新增 --draft-jsonl <path>，复用筛选/排序/limit/dedupe 后把每个任务的 Goal JSON 草稿写入一行，并支持报告和跳过任务处理。 | 待实现 | - |
+| 1 | 单任务 Goal JSON 草稿 | IDE、机器人或表单希望一次拿到可编辑 6 要素、是否需要人工复核、校验结果和下一步命令；当前 --suggest-fields 偏字段建议，缺少生成前状态和可直接接流水线的包装。 | 在 generate_goal.py 新增 --goal-json <description>，输出 description_preview、fields、sources、review_required、ready_to_generate、validation 和 recommended_commands。 | 已实现 | d8c3b85 |
+| 2 | 批量 Goal JSONL 草稿 | 团队批量清单接入 CI/流水线时，希望把所有任务草稿写成单个 JSONL 产物，便于下游逐行消费；当前 --export-fields-json 会生成多个文件，不利于管道传递。 | 在 batch_generate.py 新增 --draft-jsonl <path>，复用筛选/排序/limit/dedupe 后把每个任务的 Goal JSON 草稿写入一行，并支持报告和跳过任务处理。 | 已实现 | e08a053 |
 
 ### 本轮总结
 
-待完成。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
