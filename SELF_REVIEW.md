@@ -371,12 +371,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务可执行度评分 | 用户只想快速判断一句需求能不能直接生成高质量 `/goal`，不想同时阅读 analyze/profile/explain 多份 JSON。 | 在 generate_goal.py 新增 --score <description>，输出 readiness_score、readiness_level、缺失要素、风险和下一步动作建议。 | 待实现 | 待提交 |
-| 2 | 批量可执行度摘要 | 团队任务清单较大时需要先按可执行度找出最该补信息的任务，当前 profile-summary 只给风险和缺失项，缺少统一评分。 | 在 batch_generate.py 新增 --score-summary，复用筛选、排序、limit、dedupe 后输出任务名、可执行度分数、等级、风险和缺失要素。 | 待实现 | 待提交 |
+| 1 | 单任务可执行度评分 | 用户只想快速判断一句需求能不能直接生成高质量 `/goal`，不想同时阅读 analyze/profile/explain 多份 JSON。 | 在 generate_goal.py 新增 --score <description>，输出 readiness_score、readiness_level、缺失要素、风险和下一步动作建议。 | 已实现 | baa4599 |
+| 2 | 批量可执行度摘要 | 团队任务清单较大时需要先按可执行度找出最该补信息的任务，当前 profile-summary 只给风险和缺失项，缺少统一评分。 | 在 batch_generate.py 新增 --score-summary，复用筛选、排序、limit、dedupe 后输出任务名、可执行度分数、等级、风险和缺失要素。 | 已实现 | 30da4fe |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
