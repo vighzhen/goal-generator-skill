@@ -16,6 +16,7 @@ from generate_goal import (
     ELEMENT_LABELS,
     ELEMENT_ORDER,
     INTERACTIVE_DEFAULTS,
+    QUESTION_EXAMPLES,
     _GoalFields,
     _extract_labeled_fields,
     analyze_description,
@@ -157,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.report_md:
         _write_report_markdown(outputs, skipped_tasks, stats, Path(args.report_md), args.output_dir, args.output_file)
+    if args.missing_report_md:
+        _write_missing_report_markdown(outputs, skipped_tasks, stats, Path(args.missing_report_md))
     print(_format_summary(stats))
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -174,6 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--report-md", help="把批量处理结果写入便于人工评审的 Markdown 报告。")
+    parser.add_argument("--missing-report-md", help="把每个任务的缺失要素、风险和补全建议写入 Markdown 报告。")
     parser.add_argument("--index-md", help="为批量输出产物写入 Markdown 导航索引。")
     parser.add_argument("--include-profile", action="store_true", help="在 JSON 报告中附加任务类型、风险评分和追问策略画像。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
@@ -919,6 +923,79 @@ def _write_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_missing_report_markdown(
+    outputs: list[TaskOutput],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    missing_outputs = [output for output in outputs if output.missing_before_defaults]
+    lines = [
+        "# Batch Missing Elements Report",
+        "",
+        f"- 成功任务：{stats.success_count}",
+        f"- 需补全任务：{len(missing_outputs)}",
+        f"- 跳过任务：{stats.skipped_count}",
+        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
+        "",
+        "## 需补全任务",
+        "",
+    ]
+    lines.extend(_markdown_missing_table(missing_outputs))
+    lines.extend(["", "## 已完整任务", ""])
+    lines.extend(_markdown_complete_task_list(outputs))
+    lines.extend(["", "## 跳过任务", ""])
+    lines.extend(_markdown_skipped_table(skipped_tasks))
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _markdown_missing_table(outputs: list[TaskOutput]) -> list[str]:
+    if not outputs:
+        return ["无需要补全的成功任务。"]
+    lines = [
+        "| 任务 | 风险 | 缺失要素 | 默认填充 | 补全建议 |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for output in outputs:
+        profile = build_task_profile(output.task_description)
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(output.task_name),
+                    _markdown_cell(_profile_risk_cell(profile)),
+                    _markdown_cell(_format_labels(output.missing_before_defaults)),
+                    _markdown_cell(_format_labels(output.defaulted_keys)),
+                    _markdown_cell(_missing_fill_suggestions(output.missing_before_defaults, profile)),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _profile_risk_cell(profile: dict[str, object]) -> str:
+    return f"{profile.get('risk_level', 'unknown')}({profile.get('risk_score', '')})"
+
+
+def _missing_fill_suggestions(missing_keys: list[str], profile: dict[str, object]) -> str:
+    recommended_fields = profile.get("recommended_fields", {})
+    recommendations = recommended_fields if isinstance(recommended_fields, dict) else {}
+    suggestions: list[str] = []
+    for key in missing_keys:
+        fallback = QUESTION_EXAMPLES[key]
+        suggestions.append(f"{ELEMENT_LABELS[key]}：{recommendations.get(key, fallback)}")
+    return "\n".join(suggestions)
+
+
+def _markdown_complete_task_list(outputs: list[TaskOutput]) -> list[str]:
+    complete_outputs = [output for output in outputs if not output.missing_before_defaults]
+    if not complete_outputs:
+        return ["无已完整任务。"]
+    return [f"- {_markdown_cell(output.task_name)}" for output in complete_outputs]
 
 
 def _markdown_output_table(
