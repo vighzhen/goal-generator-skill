@@ -63,6 +63,16 @@ python3 scripts/generate_goal.py --score "给项目加单元测试"
 
 该功能适合在接到一句话需求时先做质量门禁，判断是直接生成、简单复核还是必须补信息。
 
+### 对比两个任务描述
+
+使用 `--compare` 可一次对比两个任务描述的可执行度、风险、缺失要素差异，并判断哪个更适合直接生成 `/goal`、哪个更应该先补信息：
+
+```bash
+python3 scripts/generate_goal.py --compare "给项目加单元测试" "为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q"
+```
+
+该功能适合评审多个候选需求、排优先级或快速定位更不完整的任务描述。
+
 ### 生成 6 要素字段建议
 
 使用 `--suggest-fields` 可把任务描述转成可编辑、可机器读取的 6 要素 JSON 草稿；已识别字段会保留输入内容，缺失字段会填入该任务类型下的推荐补全方向：
@@ -339,6 +349,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量任务指令生成（JSON、JSONL、CSV、YAML、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
 - 单任务 `/goal` 可执行度评分和下一步建议
+- 单任务候选描述可执行度对比
 - 单任务可编辑 6 要素字段建议 JSON
 - 单任务 6 要素字段 JSON 质量校验
 - 批量可编辑 6 要素字段 JSON 草稿导出

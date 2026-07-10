@@ -366,6 +366,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.score:
             _emit_output(json.dumps(score_description(args.score), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.compare:
+            _emit_output(
+                json.dumps(compare_descriptions(args.compare[0], args.compare[1]), ensure_ascii=False, indent=2),
+                args.output_file,
+            )
+            return 0
         if args.suggest_fields:
             _emit_output(json.dumps(suggest_goal_fields(args.suggest_fields), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -409,6 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
+    parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
@@ -458,6 +465,7 @@ def build_capabilities() -> dict[str, object]:
                 "--questions",
                 "--profile",
                 "--score",
+                "--compare",
                 "--suggest-fields",
                 "--explain-missing",
                 "--list-templates",
@@ -530,6 +538,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "评估可执行度",
                 "scenario": "快速判断一句需求距离可直接生成高质量 /goal 还差多少。",
                 "command": "python3 scripts/generate_goal.py --score '给项目加单元测试'",
+            },
+            {
+                "name": "对比两个任务描述",
+                "scenario": "同时拿到两个候选任务时，判断哪个更可直接生成 /goal、哪个更需要补信息。",
+                "command": "python3 scripts/generate_goal.py --compare '给项目加单元测试' '为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q'",
             },
             {
                 "name": "生成字段建议",
@@ -853,6 +866,113 @@ def score_description(description: str) -> dict[str, object]:
         "next_action": _readiness_next_action(level, analysis["missing"]),
         "recommended_command": _readiness_recommended_command(level),
     }
+
+
+def compare_descriptions(description_a: str, description_b: str) -> dict[str, object]:
+    """对比两个任务描述的 /goal 可执行度和补信息优先级。"""
+    if not description_a.strip() or not description_b.strip():
+        raise ValueError("--compare 需要两个非空任务描述")
+    score_a = score_description(description_a)
+    score_b = score_description(description_b)
+    comparison = _score_comparison(score_a, score_b)
+    return {
+        "a": _comparison_summary("A", description_a, score_a),
+        "b": _comparison_summary("B", description_b, score_b),
+        "score_delta_a_minus_b": comparison["delta"],
+        "ready_candidate": comparison["ready_candidate"],
+        "clarify_first": comparison["clarify_first"],
+        "missing_only_in_a": _missing_difference(score_a, score_b),
+        "missing_only_in_b": _missing_difference(score_b, score_a),
+        "recommendation": _comparison_recommendation(comparison, score_a, score_b),
+    }
+
+
+def _comparison_summary(label: str, description: str, score: dict[str, object]) -> dict[str, object]:
+    return {
+        "label": label,
+        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
+        "readiness_score": score.get("readiness_score", 0),
+        "readiness_level": score.get("readiness_level", "unknown"),
+        "missing_count": score.get("missing_count", 0),
+        "missing": score.get("missing", []),
+        "risk_level": score.get("risk_level", "unknown"),
+        "risk_score": score.get("risk_score", 0),
+        "task_type": score.get("task_type", {}),
+        "next_action": score.get("next_action", ""),
+    }
+
+
+def _score_comparison(score_a: dict[str, object], score_b: dict[str, object]) -> dict[str, object]:
+    value_a = _score_value(score_a)
+    value_b = _score_value(score_b)
+    delta = value_a - value_b
+    if delta > 0:
+        return {"delta": delta, "ready_candidate": "A", "clarify_first": "B"}
+    if delta < 0:
+        return {"delta": delta, "ready_candidate": "B", "clarify_first": "A"}
+    tie_breaker = _comparison_tie_breaker(score_a, score_b)
+    return {"delta": 0, "ready_candidate": "tie", "clarify_first": tie_breaker}
+
+
+def _comparison_tie_breaker(score_a: dict[str, object], score_b: dict[str, object]) -> str:
+    missing_delta = _missing_count(score_a) - _missing_count(score_b)
+    if missing_delta > 0:
+        return "A"
+    if missing_delta < 0:
+        return "B"
+    risk_delta = _risk_score_value(score_a) - _risk_score_value(score_b)
+    if risk_delta > 0:
+        return "A"
+    if risk_delta < 0:
+        return "B"
+    return "tie"
+
+
+def _score_value(score: dict[str, object]) -> int:
+    value = score.get("readiness_score", 0)
+    return value if isinstance(value, int) else 0
+
+
+def _missing_count(score: dict[str, object]) -> int:
+    value = score.get("missing_count", 0)
+    return value if isinstance(value, int) else 0
+
+
+def _risk_score_value(score: dict[str, object]) -> int:
+    value = score.get("risk_score", 0)
+    return value if isinstance(value, int) else 0
+
+
+def _missing_difference(left: dict[str, object], right: dict[str, object]) -> list[str]:
+    left_missing = left.get("missing", [])
+    right_missing = right.get("missing", [])
+    left_set = {key for key in left_missing if isinstance(key, str)}
+    right_set = {key for key in right_missing if isinstance(key, str)}
+    return [key for key in ELEMENT_ORDER if key in left_set and key not in right_set]
+
+
+def _comparison_recommendation(
+    comparison: dict[str, object],
+    score_a: dict[str, object],
+    score_b: dict[str, object],
+) -> str:
+    ready_candidate = comparison["ready_candidate"]
+    clarify_first = comparison["clarify_first"]
+    if ready_candidate != "tie":
+        return (
+            f"优先使用 {ready_candidate} 生成或推进 `/goal`；"
+            f"{clarify_first} 的可执行度较低，建议先补齐：{_comparison_missing_labels(clarify_first, score_a, score_b)}。"
+        )
+    if clarify_first != "tie":
+        return f"两者分数相同，但 {clarify_first} 缺失项或风险更高，建议先补齐：{_comparison_missing_labels(clarify_first, score_a, score_b)}。"
+    return "两个任务描述可执行度接近；可任选其一继续，但仍建议复核边界、验证命令和受阻条件。"
+
+
+def _comparison_missing_labels(label: object, score_a: dict[str, object], score_b: dict[str, object]) -> str:
+    score = score_a if label == "A" else score_b
+    missing = score.get("missing", [])
+    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
+    return _labels_for_keys(missing_keys) if missing_keys else "风险项或项目上下文"
 
 
 def _numeric_profile_value(profile: dict[str, object], key: str) -> int:
