@@ -580,6 +580,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        min_lint_score = _min_lint_score_from_args(args)
         if args.list_templates:
             _emit_output(json.dumps(list_task_templates(), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -621,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
         if args.lint_goal_file:
-            lint_report = lint_goal_file(args.lint_goal_file)
+            lint_report = _apply_min_lint_score(lint_goal_file(args.lint_goal_file), min_lint_score)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
         if args.lint_goal_bundle:
@@ -645,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
             return 0 if validation["valid"] else 1
         if args.lint_fields_json:
-            lint_report = lint_fields_json_file(args.lint_fields_json)
+            lint_report = _apply_min_lint_score(lint_fields_json_file(args.lint_fields_json), min_lint_score)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
         if args.generate:
@@ -683,6 +684,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lint-goal-path", help="自动识别文件、合集文件或目录树并检查 /goal 语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
+    parser.add_argument(
+        "--min-lint-score",
+        type=int,
+        help="配合 --lint-fields-json 或 --lint-goal-file，得分低于该阈值时失败（0-100）。",
+    )
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--from-json", help="从 JSON 文件读取 6 要素，命令行字段优先覆盖文件字段。")
     parser.add_argument("--output-file", help="把 analyze/profile/questions/generate 输出写入文件。")
@@ -704,6 +710,63 @@ def _emit_output(content: str, output_file: str | None) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(f"{content}\n", encoding="utf-8")
     print(f"已写入：{output_path}")
+
+
+def _min_lint_score_from_args(args: argparse.Namespace) -> int | None:
+    min_lint_score = args.min_lint_score
+    if min_lint_score is None:
+        return None
+    if min_lint_score < 0 or min_lint_score > 100:
+        raise ValueError("--min-lint-score 必须是 0 到 100 之间的整数")
+    if not (args.lint_fields_json or args.lint_goal_file):
+        raise ValueError("--min-lint-score 仅适用于 --lint-fields-json 或 --lint-goal-file")
+    return min_lint_score
+
+
+def _apply_min_lint_score(lint_report: dict[str, object], min_lint_score: int | None) -> dict[str, object]:
+    if min_lint_score is None:
+        return lint_report
+    score = _lint_report_score(lint_report)
+    score_gate = _lint_score_gate(score, min_lint_score)
+    gated_report = dict(lint_report)
+    gated_report["score_gate"] = score_gate
+    if not score_gate["passed"]:
+        gated_report["passed"] = False
+    gated_report["summary"] = _summary_with_score_gate(str(lint_report.get("summary", "")), score_gate)
+    return gated_report
+
+
+def _lint_report_score(lint_report: dict[str, object]) -> int:
+    if isinstance(lint_report.get("score"), int):
+        return int(lint_report["score"])
+    field_lint = lint_report.get("field_lint", {})
+    if isinstance(field_lint, dict):
+        return int(field_lint.get("score", 0))
+    return 0
+
+
+def _lint_score_gate(score: int, min_lint_score: int) -> dict[str, object]:
+    passed = score >= min_lint_score
+    return {
+        "enabled": True,
+        "min_score": min_lint_score,
+        "score": score,
+        "passed": passed,
+        "summary": _score_gate_summary(score, min_lint_score, passed),
+    }
+
+
+def _score_gate_summary(score: int, min_lint_score: int, passed: bool) -> str:
+    if passed:
+        return f"最低分门禁通过：得分 {score}，要求至少 {min_lint_score}。"
+    return f"最低分门禁未通过：得分 {score}，要求至少 {min_lint_score}。"
+
+
+def _summary_with_score_gate(summary: str, score_gate: dict[str, object]) -> str:
+    gate_summary = str(score_gate.get("summary", ""))
+    if not summary:
+        return gate_summary
+    return f"{summary} {gate_summary}"
 
 
 def list_task_templates() -> list[dict[str, str]]:

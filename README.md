@@ -160,9 +160,12 @@ python3 scripts/generate_goal.py --validate-fields-json goal_fields.json
 
 ```bash
 python3 scripts/generate_goal.py --lint-fields-json goal_fields.json
+
+# 更严格的 CI 门禁：语义质量得分低于 90 时失败
+python3 scripts/generate_goal.py --lint-fields-json goal_fields.json --min-lint-score 90
 ```
 
-命令输出 `score`、`issues`、`summary` 和原始结构校验结果；存在高优先级问题或得分低于门槛时退出码为 1，适合作为 `--generate --from-json` 前的质量门禁。
+命令输出 `score`、`issues`、`summary` 和原始结构校验结果；存在高优先级问题时退出码为 1，适合作为 `--generate --from-json` 前的质量门禁。追加 `--min-lint-score <0-100>` 时，报告会包含 `score_gate`，得分低于阈值也会返回非零退出码。
 
 ### 校验已有 /goal 文件
 
@@ -178,9 +181,12 @@ python3 scripts/generate_goal.py --validate-goal-file goal.txt
 
 ```bash
 python3 scripts/generate_goal.py --lint-goal-file goal.txt
+
+# 最终 /goal 文件得分低于 90 时失败
+python3 scripts/generate_goal.py --lint-goal-file goal.txt --min-lint-score 90
 ```
 
-命令输出 `validation`、`extracted_fields`、`field_lint` 和 `summary`；结构无效或语义质量未通过时退出码为 1。
+命令输出 `validation`、`extracted_fields`、`field_lint` 和 `summary`；结构无效或语义质量未通过时退出码为 1。追加 `--min-lint-score <0-100>` 时，会用 `field_lint.score` 执行最低分门禁，并在报告中输出 `score_gate`。
 
 ### 检查 /goal 合集文件
 
