@@ -61,20 +61,15 @@ SPECIFICITY_KEYWORDS: tuple[str, ...] = (
     "报告",
     "覆盖率",
 )
-VERIFICATION_KEYWORDS: tuple[str, ...] = (
+VERIFICATION_ACTION_KEYWORDS: tuple[str, ...] = (
     "验证",
     "运行",
+    "执行",
+    "确认",
+    "检查",
     "通过",
-    "pytest",
-    "unittest",
-    "py_compile",
-    "ruff",
-    "mypy",
-    "go test",
-    "npm test",
-    "pnpm test",
-    "覆盖率",
-    "ci",
+    "跑测试",
+    "测试通过",
 )
 CONSTRAINT_KEYWORDS: tuple[str, ...] = (
     "不修改",
@@ -277,7 +272,7 @@ def _is_element_present(key: str, text: str) -> bool:
     if key == "outcome":
         return _has_outcome(lowered_text)
     if key == "verification":
-        return _contains_any(lowered_text, VERIFICATION_KEYWORDS)
+        return _has_verification(lowered_text)
     if key == "constraints":
         return _contains_any(lowered_text, CONSTRAINT_KEYWORDS)
     if key == "boundaries":
@@ -301,6 +296,10 @@ def _has_outcome(lowered_text: str) -> bool:
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword.lower() in text for keyword in keywords)
+
+
+def _has_verification(lowered_text: str) -> bool:
+    return _contains_any(lowered_text, VERIFICATION_ACTION_KEYWORDS)
 
 
 def _mentions_test_task(text: str) -> bool:
