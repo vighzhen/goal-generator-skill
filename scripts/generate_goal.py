@@ -560,7 +560,7 @@ def _blocked_rule(blocked: str) -> str:
 def _build_commit_section(goal: _GoalFields, branch_name: str) -> str:
     commit_range = _expected_commit_range(goal.iteration)
     commit_scope = _infer_commit_scope(goal.outcome)
-    examples = _commit_examples(goal.outcome)
+    examples = _commit_examples(goal.outcome, goal.boundaries)
     lines = [
         "提交规则：",
         f"- 预期提交数量为 {commit_range}；如果实际偏离，必须在最终回复解释原因。",
@@ -581,10 +581,10 @@ def _expected_commit_range(iteration: str) -> str:
     return DEFAULT_COMMIT_RANGE
 
 
-def _commit_examples(outcome: str) -> list[str]:
+def _commit_examples(outcome: str, boundaries: str) -> list[str]:
     commit_type = _infer_commit_type(outcome)
     scope = _infer_commit_scope(outcome)
-    path_hint = _extract_path_hint(outcome)
+    path_hint = _extract_path_hint(f"{boundaries} {outcome}")
     change_type = _commit_change_type(outcome)
     return [
         f"{commit_type}({scope}): {change_type} - {path_hint}",
