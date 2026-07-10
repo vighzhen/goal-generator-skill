@@ -765,6 +765,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "fail-on-high-risk"`、低风险示例清单 `--profile-tasks --fail-on-high-risk --summary-only --report-json` 通过并断言 `high_risk_count=0`、包含 high 风险任务的自定义清单返回失败退出码并写入报告、未配合 `--profile-tasks` 使用 `--fail-on-high-risk` 返回参数错误、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 23 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/batch_generate.py | `TaskOutput` dataclass 中 `task_description` 字段重复声明两次。虽然当前 Python 会以同名注解覆盖方式运行且未造成直接失败，但这会误导维护者、降低代码可读性，也可能让后续字段审计或文档生成工具产生歧义。 | 待修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 团队默认值语义门禁 | 团队常通过 `--defaults-json` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 给批量任务补默认 6 要素；如果默认值空泛或只写“跑测试/相关文件”，后续批量生成会把低质量默认值扩散到大量任务。当前只能等生成后再查，或手工把默认值改造成完整 fields JSON 去跑单任务 lint。 | 在 `scripts/batch_generate.py` 新增 `--lint-defaults-json <文件>` 独立模式，不要求任务输入；读取 defaults JSON（支持顶层 6 要素或 `fields` 包装）、合并交互默认值后复用 6 要素语义质量检查，输出覆盖字段、合并后字段、质量分数、问题和退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 团队默认值语义门禁 | `scripts/generate_goal.py --lint-fields-json` | 单任务字段 lint 要求用户准备完整 6 要素字段 JSON；新功能面向批量默认值文件，支持部分 overrides 与交互默认值合并，并直接验证会被 `--defaults-json` 实际采用的结果。 | 通过 |
+| 团队默认值语义门禁 | `scripts/batch_generate.py --lint-fields` | 批量字段 lint 检查任务清单内每个任务的 fields/description；新功能检查团队级默认值配置本身，拦截默认值污染所有任务的风险。 | 通过 |
+| 团队默认值语义门禁 | `--check` / `--dry-run` | check/dry-run 关注任务是否可生成及默认填充项；新功能单独审计默认值配置质量，不需要任务清单。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 团队默认值语义门禁 | 团队在 CI 或共享脚本中维护默认值文件，需要先确认默认 verification/constraints/boundaries 等足够具体，避免低质量默认值批量扩散。 | 手工打开默认值文件逐项审查，或构造完整 fields JSON 用单任务 lint；也可能直接批量生成后再发现默认值太泛。 | 一条命令直接检查 defaults 文件实际合并后的质量和覆盖字段，可在 CI 中对默认值配置单独设门禁。 | 面向批量默认值配置与合并语义，而不是单任务字段或任务清单质量检查。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -773,7 +803,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 22 轮批量画像高风险门禁，准备进入第 23 轮持续进化；累计修复 4 个已完成问题，新增 22 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 23 轮审查清单已建立，正在修复 `TaskOutput` 重复字段并实现团队默认值语义门禁；累计修复 4 个已完成问题，新增 22 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
