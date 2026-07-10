@@ -628,6 +628,10 @@ def main(argv: list[str] | None = None) -> int:
             lint_report = lint_goal_dir(args.lint_goal_dir)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
+        if args.lint_goal_tree:
+            lint_report = lint_goal_tree(args.lint_goal_tree)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.validate_fields_json:
             validation = validate_fields_json_file(args.validate_fields_json)
             _emit_output(json.dumps(validation, ensure_ascii=False, indent=2), args.output_file)
@@ -666,6 +670,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
     parser.add_argument("--lint-goal-file", help="检查已有 /goal 指令文件的结构和 6 要素语义质量。")
     parser.add_argument("--lint-goal-dir", help="批量检查目录内 .txt /goal 文件的结构和 6 要素语义质量。")
+    parser.add_argument("--lint-goal-tree", help="递归检查目录树内 .txt /goal 文件的结构和 6 要素语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
     parser.add_argument("--lint-fields-json", help="检查 6 要素 JSON 的语义质量、具体性和可执行性。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
@@ -744,10 +749,57 @@ def lint_goal_dir(goal_dir: str) -> dict[str, object]:
     }
 
 
+def lint_goal_tree(goal_dir: str) -> dict[str, object]:
+    """递归校验目录树内已有 /goal 指令文件的结构和语义质量。"""
+    directory = Path(goal_dir)
+    if not directory.exists():
+        raise ValueError(f"--lint-goal-tree 不存在：{goal_dir}")
+    if not directory.is_dir():
+        raise ValueError(f"--lint-goal-tree 必须是目录：{goal_dir}")
+    goal_files, skipped_directories = _goal_tree_files(directory)
+    file_reports = [_goal_tree_file_report(directory, goal_file) for goal_file in goal_files]
+    failed_reports = [report for report in file_reports if not report["passed"]]
+    passed = bool(goal_files) and not failed_reports
+    return {
+        "passed": passed,
+        "source": str(directory),
+        "mode": "recursive",
+        "file_count": len(goal_files),
+        "passed_count": len(goal_files) - len(failed_reports),
+        "failed_count": len(failed_reports),
+        "skipped_directory_count": len(skipped_directories),
+        "skipped_directories": [_goal_tree_relative_path(directory, path) for path in skipped_directories],
+        "files": file_reports,
+        "summary": _goal_tree_lint_summary(passed, len(goal_files), len(failed_reports)),
+    }
+
+
 def _goal_dir_files(directory: Path) -> list[Path]:
     return sorted(
         (path for path in directory.iterdir() if path.is_file() and path.suffix.lower() == ".txt"),
         key=lambda path: path.name,
+    )
+
+
+def _goal_tree_files(directory: Path) -> tuple[list[Path], list[Path]]:
+    goal_files: list[Path] = []
+    skipped_directories: list[Path] = []
+    for current_root, dirnames, filenames in os.walk(directory):
+        current_path = Path(current_root)
+        kept_dirnames: list[str] = []
+        for dirname in sorted(dirnames):
+            if dirname in INSPECT_SKIP_DIRS:
+                skipped_directories.append(current_path / dirname)
+                continue
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        for filename in sorted(filenames):
+            file_path = current_path / filename
+            if file_path.is_file() and file_path.suffix.lower() == ".txt":
+                goal_files.append(file_path)
+    return (
+        sorted(goal_files, key=lambda path: _goal_tree_relative_path(directory, path)),
+        sorted(skipped_directories, key=lambda path: _goal_tree_relative_path(directory, path)),
     )
 
 
@@ -769,12 +821,33 @@ def _goal_dir_file_report(goal_file: Path) -> dict[str, object]:
     }
 
 
+def _goal_tree_file_report(root: Path, goal_file: Path) -> dict[str, object]:
+    report = _goal_dir_file_report(goal_file)
+    report["relative_path"] = _goal_tree_relative_path(root, goal_file)
+    return report
+
+
+def _goal_tree_relative_path(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root)).replace("\\", "/")
+    except ValueError:
+        return str(path)
+
+
 def _goal_dir_lint_summary(passed: bool, file_count: int, failed_count: int) -> str:
     if not file_count:
         return "目录内未发现可检查的 .txt /goal 文件。"
     if passed:
         return f"/goal 目录语义质量检查通过，共 {file_count} 个文件。"
     return f"/goal 目录语义质量检查未通过：失败 {failed_count} 个，总计 {file_count} 个文件。"
+
+
+def _goal_tree_lint_summary(passed: bool, file_count: int, failed_count: int) -> str:
+    if not file_count:
+        return "目录树内未发现可检查的 .txt /goal 文件。"
+    if passed:
+        return f"/goal 目录树递归语义质量检查通过，共 {file_count} 个文件。"
+    return f"/goal 目录树递归语义质量检查未通过：失败 {failed_count} 个，总计 {file_count} 个文件。"
 
 
 def lint_goal_text(goal_text: str, source: str = "") -> dict[str, object]:

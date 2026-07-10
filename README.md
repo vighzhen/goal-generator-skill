@@ -192,6 +192,16 @@ python3 scripts/generate_goal.py --lint-goal-dir output/
 
 命令按文件名稳定扫描目录直属 `.txt` 文件，输出 `file_count`、`passed_count`、`failed_count`、每个文件的结构与语义质量结果；任一文件未通过或目录内没有 `.txt` 目标文件时退出码为 1，适合批量生成后的 CI 或交付前质量门禁。
 
+### 递归检查 /goal 输出目录树
+
+如果 `/goal` 文件按模块、依赖波次、任务来源或日期分散在多级子目录中，可用 `--lint-goal-tree` 递归检查整棵目录树下所有 `.txt` 文件：
+
+```bash
+python3 scripts/generate_goal.py --lint-goal-tree output/
+```
+
+命令会跳过 `.git`、缓存目录、依赖目录和构建产物目录，按相对路径稳定排序输出 `file_count`、`passed_count`、`failed_count`、`skipped_directories` 和每个文件的 `relative_path`、结构校验与语义质量结果；任一文件未通过或目录树内没有 `.txt` 目标文件时退出码为 1。若只想检查目录直属文件，继续使用 `--lint-goal-dir`。
+
 ### 交互模式
 
 使用 `--interactive` 可按提示输入任务描述和补充信息，由脚本循环分析缺失要素并生成最终指令：
@@ -393,6 +403,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 已有 `/goal` 文件结构校验
 - 已有 `/goal` 文件语义质量检查
 - `/goal` 输出目录结构与语义质量门禁
+- `/goal` 嵌套输出目录树递归结构与语义质量门禁
 - 一键生成可复制的缺失要素追问文案
 - 批量任务缺失要素追问文案
 - 批量追问回答合并回任务清单
