@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    outputs, skipped_count = _process_tasks(tasks, args.dry_run, args.verbose)
+    outputs, skipped_count = _process_tasks(tasks, args.dry_run, args.strict, args.verbose)
     _write_outputs(outputs, args.output_dir, args.output_file)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), skipped_count, elapsed_seconds)
@@ -111,6 +111,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
+    parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
 
@@ -272,6 +273,7 @@ def _invalid_task(index: int, name: str, description: str) -> TaskSpec:
 def _process_tasks(
     tasks: list[TaskSpec],
     dry_run: bool,
+    strict: bool,
     verbose: bool,
 ) -> tuple[list[TaskOutput], int]:
     outputs: list[TaskOutput] = []
@@ -279,7 +281,7 @@ def _process_tasks(
     used_slugs: set[str] = set()
     for index, task in enumerate(tasks, start=1):
         try:
-            output = _process_one_task(task, index, dry_run, used_slugs, verbose)
+            output = _process_one_task(task, index, dry_run, strict, used_slugs, verbose)
             outputs.append(output)
         except (ValueError, OSError) as error:
             skipped_count += 1
@@ -291,6 +293,7 @@ def _process_one_task(
     task: TaskSpec,
     index: int,
     dry_run: bool,
+    strict: bool,
     used_slugs: set[str],
     verbose: bool,
 ) -> TaskOutput:
@@ -298,7 +301,7 @@ def _process_one_task(
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
-    prepared = _prepare_task(task)
+    prepared = _prepare_task(task, strict)
     content = _format_dry_run(prepared) if dry_run else _format_goal_output(prepared)
     slug = _unique_slug(task.name, index, used_slugs)
     if verbose:
@@ -306,12 +309,14 @@ def _process_one_task(
     return TaskOutput(task_name=task.name, content=content, file_slug=slug)
 
 
-def _prepare_task(task: TaskSpec) -> PreparedTask:
+def _prepare_task(task: TaskSpec, strict: bool = False) -> PreparedTask:
     analysis = analyze_description(task.description)
     values = _extract_labeled_fields(task.description)
     values.update(task.fields)
     _merge_description_present(values, task.description, list(analysis["present"].keys()))
     missing_before_defaults = _missing_keys(values)
+    if strict and missing_before_defaults:
+        raise ValueError(f"strict 模式缺失要素：{_format_labels(missing_before_defaults)}")
     defaulted_keys = _apply_defaults(values)
     goal = _goal_from_values(values)
     present_keys = [key for key in ELEMENT_ORDER if key not in missing_before_defaults]

@@ -121,6 +121,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
 # 从 Markdown 表格批量分析，适合复用需求文档里的任务清单
 python3 scripts/batch_generate.py --input examples/sample_tasks.md --dry-run
 
+# 严格模式：缺失 6 要素的任务会跳过，不使用默认填充，适合 CI 或团队交付前检查
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --strict
+
 # 每个任务生成一个独立 .txt 文件，输出目录不存在时会自动创建
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/
 
@@ -128,7 +131,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查。
 
 ## 6 个必要要素
 
