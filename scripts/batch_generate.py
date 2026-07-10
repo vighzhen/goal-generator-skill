@@ -20,6 +20,7 @@ from generate_goal import (
     _GoalFields,
     _extract_labeled_fields,
     analyze_description,
+    lint_fields_json_data,
     render_goal_text,
 )
 
@@ -105,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.lint_fields:
+        return _run_lint_fields_mode(tasks, args, start_time)
     if args.plan_dependencies:
         return _run_dependency_plan_mode(tasks, args, start_time)
     if args.list_tasks:
@@ -156,6 +159,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
+    parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
@@ -239,6 +243,158 @@ def _run_dependency_plan_mode(tasks: list[TaskSpec], args: argparse.Namespace, s
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
+
+
+def _run_lint_fields_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    lint_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    lint_report = _build_batch_field_lint_report(lint_tasks)
+    summary_only = args.summary_only or args.check
+    if not summary_only:
+        print(_format_batch_field_lint_report(lint_report))
+    elapsed_seconds = time.perf_counter() - start_time
+    failed_count = int(lint_report["failed_count"])
+    stats = BatchStats(int(lint_report["passed_count"]), failed_count + len(skipped_tasks), elapsed_seconds)
+    if args.report_json:
+        _write_batch_field_lint_report(lint_report, skipped_tasks, stats, Path(args.report_json))
+    print(_format_lint_fields_summary(lint_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if failed_count:
+        return 1
+    if fail_on_skipped and skipped_tasks:
+        return 1
+    return 0
+
+
+def _build_batch_field_lint_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_reports = [_task_field_lint_report(task) for task in tasks]
+    failed_count = sum(1 for report in task_reports if not report["passed"])
+    return {
+        "valid": failed_count == 0,
+        "task_count": len(task_reports),
+        "passed_count": len(task_reports) - failed_count,
+        "failed_count": failed_count,
+        "tasks": task_reports,
+    }
+
+
+def _task_field_lint_report(task: TaskSpec) -> dict[str, object]:
+    if task.load_error:
+        return _failed_task_field_lint_report(task.name, task.description, task.load_error)
+    field_values, field_sources = _task_lint_field_values(task)
+    lint_report = lint_fields_json_data({"fields": field_values}, task.name)
+    validation = lint_report.get("validation", {})
+    return {
+        "name": task.name,
+        "description": task.description,
+        "passed": lint_report["passed"],
+        "score": lint_report["score"],
+        "issue_count": lint_report["issue_count"],
+        "high_issue_count": lint_report["high_issue_count"],
+        "field_sources": field_sources,
+        "missing_fields": validation.get("missing_fields", []) if isinstance(validation, dict) else [],
+        "issues": lint_report["issues"],
+        "summary": lint_report["summary"],
+    }
+
+
+def _failed_task_field_lint_report(task_name: str, description: str, reason: str) -> dict[str, object]:
+    return {
+        "name": task_name,
+        "description": description,
+        "passed": False,
+        "score": 0,
+        "issue_count": 1,
+        "high_issue_count": 1,
+        "field_sources": {key: "missing" for key in ELEMENT_ORDER},
+        "missing_fields": list(ELEMENT_ORDER),
+        "issues": [
+            {
+                "element": "task",
+                "label": "任务输入",
+                "severity": "high",
+                "message": reason,
+                "suggestion": _skip_suggestion(reason),
+            }
+        ],
+        "summary": f"任务输入无效：{reason}",
+    }
+
+
+def _task_lint_field_values(task: TaskSpec) -> tuple[dict[str, str], dict[str, str]]:
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {key: "missing" for key in ELEMENT_ORDER}
+    if task.description:
+        analysis = analyze_description(task.description)
+        description_fields = _extract_labeled_fields(task.description)
+        values.update(description_fields)
+        for key in description_fields:
+            sources[key] = "description_label"
+        _merge_lint_description_present(values, sources, task.description, list(analysis["present"].keys()))
+    for key, value in task.fields.items():
+        if value:
+            values[key] = value
+            sources[key] = "fields"
+    return values, sources
+
+
+def _merge_lint_description_present(
+    values: dict[str, str],
+    sources: dict[str, str],
+    description: str,
+    present_keys: list[str],
+) -> None:
+    for key in present_keys:
+        if key in values:
+            continue
+        values[key] = _description_fallback(key, description)
+        sources[key] = "description_inferred"
+
+
+def _format_batch_field_lint_report(lint_report: dict[str, object]) -> str:
+    lines = ["批量字段语义质量检查："]
+    task_reports = lint_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        lines.append("无可检查任务。")
+        return "\n".join(lines)
+    for task_report in task_reports:
+        if isinstance(task_report, dict):
+            lines.extend(_format_task_field_lint_lines(task_report))
+    return "\n".join(lines)
+
+
+def _format_task_field_lint_lines(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    status = "通过" if task_report.get("passed") else "未通过"
+    lines = [
+        (
+            f"- {name}：{status}，得分 {task_report.get('score', 0)}，"
+            f"问题 {task_report.get('issue_count', 0)} 个，高优先级 {task_report.get('high_issue_count', 0)} 个。"
+        )
+    ]
+    if task_report.get("passed"):
+        return lines
+    issues = task_report.get("issues", [])
+    if not isinstance(issues, list):
+        return lines
+    for issue in issues[:3]:
+        if not isinstance(issue, dict):
+            continue
+        lines.append(
+            f"  - {issue.get('label', issue.get('element', '未知要素'))}："
+            f"{issue.get('message', '')}；建议：{issue.get('suggestion', '')}"
+        )
+    if len(issues) > 3:
+        lines.append(f"  - 其余 {len(issues) - 3} 个问题请查看 --report-json。")
+    return lines
+
+
+def _format_lint_fields_summary(lint_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "字段语义质量检查完成："
+        f"通过 {lint_report.get('passed_count', 0)} 个，"
+        f"失败 {lint_report.get('failed_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
 
 
 def _build_dependency_plan(tasks: list[TaskSpec]) -> dict[str, object]:
@@ -813,6 +969,23 @@ def _write_dependency_plan_report(
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
         "dependency_plan": plan,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_batch_field_lint_report(
+    lint_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "field_lint": lint_report,
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

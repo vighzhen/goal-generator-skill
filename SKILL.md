@@ -19,7 +19,7 @@ description: Codex CLI Goal 指令生成器。用户描述编码任务需求，S
 4. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
 5. **一次性追问**：如果存在缺失或含糊要素，一次性列出全部缺失项并给出示例，不要逐项来回追问；需要直接生成可发送文案时可调用 `scripts/generate_goal.py --questions "用户任务描述"`。批量任务应按任务名称汇总缺失项。
 6. **整合用户补充**：用户回答后，把原始需求和补充信息合并为 6 个明确字段；命令行或机器人场景可调用 `scripts/generate_goal.py --merge-context "原始需求" --supplement "用户补充"` 输出字段草稿、字段来源和剩余缺口；如果仍缺关键技术决策，不要代替用户决定，继续一次性追问剩余关键缺口。
-7. **生成指令**：单任务调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或用 `--from-json <文件>` 从 JSON 读取 6 要素；对人工或自动化编辑过的字段 JSON，先用 `--validate-fields-json <文件>` 做结构门禁，再用 `--lint-fields-json <文件>` 做语义质量门禁；如果 6 要素还缺少真实代码边界或项目验证命令，可先用 `--inspect-path` 的 `project_validation` 与 `suggested_fields` 作为草稿来源；如果需求来自多轮问答，可先用 `--merge-context` 的 `fields` 作为草稿来源；只有一句话需求且用户接受默认验证/约束时，可用 `scripts/generate_goal.py --generate "描述" --branch <分支名>` 生成草案并提醒用户复核默认填充项；也可参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令；已有指令可用 `--validate-goal-file <文件>` 复核结构；批量任务调用 `scripts/batch_generate.py --input <JSON或CSV文件>`，可按需使用 `--list-tasks` 预览任务、`--plan-dependencies` 检查 `depends_on`/`dependencies` 执行顺序、`--check` 校验清单、`--defaults-json` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 复用团队默认值、`--filter`/`--limit` 控制处理范围、`--sort-by` 稳定输出顺序、`--dedupe` 去重、`--summary-only` 摘要输出、`--output-dir`、`--output-file`、`--strict`/`--fail-on-skipped` 质量门禁、`--report-json` 结构化报告。
+7. **生成指令**：单任务调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或用 `--from-json <文件>` 从 JSON 读取 6 要素；对人工或自动化编辑过的字段 JSON，先用 `--validate-fields-json <文件>` 做结构门禁，再用 `--lint-fields-json <文件>` 做语义质量门禁；如果 6 要素还缺少真实代码边界或项目验证命令，可先用 `--inspect-path` 的 `project_validation` 与 `suggested_fields` 作为草稿来源；如果需求来自多轮问答，可先用 `--merge-context` 的 `fields` 作为草稿来源；只有一句话需求且用户接受默认验证/约束时，可用 `scripts/generate_goal.py --generate "描述" --branch <分支名>` 生成草案并提醒用户复核默认填充项；也可参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令；已有指令可用 `--validate-goal-file <文件>` 复核结构；批量任务调用 `scripts/batch_generate.py --input <JSON或CSV文件>`，可按需使用 `--list-tasks` 预览任务、`--plan-dependencies` 检查 `depends_on`/`dependencies` 执行顺序、`--lint-fields` 批量检查字段语义质量、`--check` 校验清单、`--defaults-json` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 复用团队默认值、`--filter`/`--limit` 控制处理范围、`--sort-by` 稳定输出顺序、`--dedupe` 去重、`--summary-only` 摘要输出、`--output-dir`、`--output-file`、`--strict`/`--fail-on-skipped` 质量门禁、`--report-json` 结构化报告。
 8. **输出结果**：先用 1-2 句话确认已生成什么指令、强调哪些关键约束；再输出带分隔线的纯文本 `/goal` 指令，不能用 Markdown 代码块包裹；需要落盘时可为单任务脚本追加 `--output-file <path>`。批量输出时每个任务之间保留任务名称和空行分隔。
 
 ## 3. 6 要素定义和检查逻辑
@@ -129,7 +129,7 @@ Blocked Stop Condition 是何时允许跳过、何时必须停下问人。例如
 
 ## 9. 适用和不适用场景
 
-适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、英文 Issue/PR/Jira 编码任务描述分析、多轮问答补充信息合并、6 要素字段语义质量门禁、从现有文件/目录反向整理 `/goal` 边界与项目配置验证线索、存在任务依赖的批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
+适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、英文 Issue/PR/Jira 编码任务描述分析、多轮问答补充信息合并、单任务或批量 6 要素字段语义质量门禁、从现有文件/目录反向整理 `/goal` 边界与项目配置验证线索、存在任务依赖的批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
 
 不适用场景：非编码任务、主要依赖人工判断的设计决策、一次性小改动、没有明确验证面的探索性讨论。
 
