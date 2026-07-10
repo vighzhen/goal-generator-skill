@@ -580,12 +580,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务 Markdown 就绪度卡片 | 用户只想快速知道一个任务能不能直接生成 `/goal`、缺哪些要素和下一步命令；当前 --score 是 JSON，--review-card 偏完整评审材料，不够轻量。 | 在 generate_goal.py 新增 --readiness-md <description>，输出紧凑 Markdown 卡片，包含评分、等级、任务类型、风险、6 要素状态、下一步动作和推荐命令。 | 待实现 | - |
-| 2 | 批量 Markdown 就绪度矩阵 | 团队维护大批任务时，希望用一张矩阵看到每个任务 6 要素是否具备、分数和优先动作；当前 score-report/review-board 不能横向展示 6 要素状态。 | 在 batch_generate.py 新增 --readiness-matrix-md <path>，输出任务 × 6 要素状态矩阵、评分、风险、下一步建议，并支持 report-json/dedupe/summary-only/fail-on-skipped。 | 待实现 | - |
+| 1 | 单任务 Markdown 就绪度卡片 | 用户只想快速知道一个任务能不能直接生成 `/goal`、缺哪些要素和下一步命令；当前 --score 是 JSON，--review-card 偏完整评审材料，不够轻量。 | 在 generate_goal.py 新增 --readiness-md <description>，输出紧凑 Markdown 卡片，包含评分、等级、任务类型、风险、6 要素状态、下一步动作和推荐命令。 | 已实现 | e1a7692 |
+| 2 | 批量 Markdown 就绪度矩阵 | 团队维护大批任务时，希望用一张矩阵看到每个任务 6 要素是否具备、分数和优先动作；当前 score-report/review-board 不能横向展示 6 要素状态。 | 在 batch_generate.py 新增 --readiness-matrix-md <path>，输出任务 × 6 要素状态矩阵、评分、风险、下一步建议，并支持 report-json/dedupe/summary-only/fail-on-skipped。 | 已实现 | 12bfa0c |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能（进行中）。
+修复 0 个问题，新增 2 个功能。用户要求第 28 轮完成后停止，不再启动第 29 轮。
 
 ## 用户纠正记录
 
