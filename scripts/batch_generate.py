@@ -115,12 +115,6 @@ class TaskProfileSummary:
 
 
 @dataclass(frozen=True)
-class TaskScoreSummary:
-    task: TaskSpec
-    score: dict[str, object]
-
-
-@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -147,8 +141,6 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    if args.score_summary or args.score_report_md or args.fail_below_score is not None:
-        return _run_score_summary_mode(tasks, args)
     if args.profile_summary:
         return _run_profile_summary_mode(tasks, args)
     if args.list_tasks:
@@ -210,9 +202,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
-    parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
-    parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
-    parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -322,66 +311,6 @@ def _run_profile_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -
     return 0
 
 
-def _run_score_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    try:
-        score_gate_threshold = _score_gate_threshold(args.fail_below_score)
-    except ValueError as error:
-        print(f"参数错误：{error}", file=sys.stderr)
-        return 1
-    start_time = time.perf_counter()
-    scored_tasks, skipped_tasks = _build_score_summaries(tasks, args.dedupe)
-    summary_only = args.summary_only or args.check
-    if not summary_only:
-        _print_score_summary(scored_tasks)
-    stats = BatchStats(len(scored_tasks), len(skipped_tasks), time.perf_counter() - start_time)
-    if args.report_json:
-        _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json), score_gate_threshold)
-    if args.score_report_md:
-        _write_score_report_markdown(scored_tasks, skipped_tasks, stats, Path(args.score_report_md), score_gate_threshold)
-    print(_format_summary(stats))
-    score_gate_failures = _score_gate_failures(scored_tasks, score_gate_threshold)
-    if score_gate_failures:
-        _print_score_gate_failures(score_gate_failures, score_gate_threshold)
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    if score_gate_failures:
-        return 1
-    return 0
-
-
-def _score_gate_threshold(value: int | None) -> int | None:
-    if value is None:
-        return None
-    if value < 0 or value > 100:
-        raise ValueError("--fail-below-score 必须是 0 到 100 之间的整数")
-    return value
-
-
-def _score_gate_failures(scored_tasks: list[TaskScoreSummary], threshold: int | None) -> list[TaskScoreSummary]:
-    if threshold is None:
-        return []
-    return [scored_task for scored_task in scored_tasks if _score_value(scored_task.score) < threshold]
-
-
-def _score_value(score: dict[str, object]) -> int:
-    value = score.get("readiness_score", 0)
-    return value if isinstance(value, int) else 0
-
-
-def _print_score_gate_failures(failures: list[TaskScoreSummary], threshold: int | None) -> None:
-    if threshold is None:
-        return
-    print(f"可执行度门禁失败：{len(failures)} 个任务低于 {threshold} 分。", file=sys.stderr)
-    for failure in failures:
-        score = failure.score
-        print(
-            f"- {failure.task.name}: {score.get('readiness_score', '')} "
-            f"({score.get('readiness_level', 'unknown')})",
-            file=sys.stderr,
-        )
-
-
 def _run_field_status_csv_mode(
     tasks: list[TaskSpec],
     args: argparse.Namespace,
@@ -427,39 +356,10 @@ def _build_profile_summaries(
     return profiled_tasks, skipped_tasks
 
 
-def _build_score_summaries(
-    tasks: list[TaskSpec],
-    dedupe: bool,
-) -> tuple[list[TaskScoreSummary], list[SkippedTask]]:
-    scored_tasks: list[TaskScoreSummary] = []
-    skipped_tasks: list[SkippedTask] = []
-    seen_task_keys: set[str] = set()
-    for task in tasks:
-        if dedupe and _is_duplicate_task(task, seen_task_keys):
-            reason = "重复任务：任务名和描述已出现过"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        if task.load_error:
-            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
-            continue
-        if not task.description:
-            reason = "缺少 description"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        scored_tasks.append(TaskScoreSummary(task, score_description(task.description)))
-    return scored_tasks, skipped_tasks
-
-
 def _print_profile_summary(profiled_tasks: list[TaskProfileSummary]) -> None:
     print("序号\t任务\t类型\t风险\t缺失要素")
     for index, profiled_task in enumerate(profiled_tasks, start=1):
         print(_profile_summary_line(index, profiled_task))
-
-
-def _print_score_summary(scored_tasks: list[TaskScoreSummary]) -> None:
-    print("序号\t任务\t分数\t等级\t风险\t缺失要素")
-    for index, scored_task in enumerate(scored_tasks, start=1):
-        print(_score_summary_line(index, scored_task))
 
 
 def _profile_summary_line(index: int, profiled_task: TaskProfileSummary) -> str:
@@ -472,18 +372,6 @@ def _profile_summary_line(index: int, profiled_task: TaskProfileSummary) -> str:
     missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
     missing_labels = _format_labels(missing_keys)
     return f"{index}\t{profiled_task.task.name}\t{task_label}\t{risk_level}({risk_score})\t{missing_labels}"
-
-
-def _score_summary_line(index: int, scored_task: TaskScoreSummary) -> str:
-    score = scored_task.score
-    readiness_score = str(score.get("readiness_score", ""))
-    readiness_level = str(score.get("readiness_level", "unknown"))
-    risk_level = str(score.get("risk_level", "unknown"))
-    risk_score = str(score.get("risk_score", ""))
-    missing = score.get("missing", [])
-    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
-    missing_labels = _format_labels(missing_keys)
-    return f"{index}\t{scored_task.task.name}\t{readiness_score}\t{readiness_level}\t{risk_level}({risk_score})\t{missing_labels}"
 
 
 def _load_default_values(defaults_json: str | None) -> dict[str, str]:
@@ -1300,111 +1188,6 @@ def _write_profile_summary_report(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_score_summary_report(
-    scored_tasks: list[TaskScoreSummary],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-    score_gate_threshold: int | None = None,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "success_count": stats.success_count,
-        "skipped_count": stats.skipped_count,
-        "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "score_gate": _score_gate_report(scored_tasks, score_gate_threshold),
-        "tasks": [_task_score_summary_report(scored_task) for scored_task in scored_tasks],
-        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _score_gate_report(scored_tasks: list[TaskScoreSummary], threshold: int | None) -> dict[str, object]:
-    if threshold is None:
-        return {"enabled": False}
-    failures = _score_gate_failures(scored_tasks, threshold)
-    return {
-        "enabled": True,
-        "threshold": threshold,
-        "failed_count": len(failures),
-        "failed_tasks": [
-            {
-                "name": failure.task.name,
-                "readiness_score": failure.score.get("readiness_score", 0),
-                "readiness_level": failure.score.get("readiness_level", "unknown"),
-                "missing": failure.score.get("missing", []),
-            }
-            for failure in failures
-        ],
-    }
-
-
-def _write_score_report_markdown(
-    scored_tasks: list[TaskScoreSummary],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-    score_gate_threshold: int | None = None,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# Batch Readiness Score Report",
-        "",
-        f"- 成功任务：{stats.success_count}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-    ]
-    if score_gate_threshold is not None:
-        failures = _score_gate_failures(scored_tasks, score_gate_threshold)
-        lines.extend(
-            [
-                "## 阈值门禁",
-                "",
-                f"- 最低分：{score_gate_threshold}",
-                f"- 低于阈值：{len(failures)}",
-                "",
-            ]
-        )
-    lines.extend(["## 评分摘要", ""])
-    lines.extend(_markdown_score_table(scored_tasks))
-    lines.extend(["", "## 跳过任务", ""])
-    lines.extend(_markdown_skipped_table(skipped_tasks))
-    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _markdown_score_table(scored_tasks: list[TaskScoreSummary]) -> list[str]:
-    if not scored_tasks:
-        return ["无可评分任务。"]
-    lines = [
-        "| 任务 | 分数 | 等级 | 风险 | 缺失要素 | 下一步建议 |",
-        "| --- | --- | --- | --- | --- | --- |",
-    ]
-    for scored_task in scored_tasks:
-        score = scored_task.score
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(scored_task.task.name),
-                    _markdown_cell(str(score.get("readiness_score", ""))),
-                    _markdown_cell(str(score.get("readiness_level", "unknown"))),
-                    _markdown_cell(f"{score.get('risk_level', 'unknown')}({score.get('risk_score', '')})"),
-                    _markdown_cell(_score_missing_labels(score)),
-                    _markdown_cell(str(score.get("next_action", ""))),
-                ]
-            )
-            + " |"
-        )
-    return lines
-
-
-def _score_missing_labels(score: dict[str, object]) -> str:
-    missing = score.get("missing", [])
-    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
-    return _format_labels(missing_keys)
-
-
 def _task_list_report(task: TaskSpec, include_profile: bool = False) -> dict[str, object]:
     report: dict[str, object] = {"name": task.name, "description": task.description}
     if include_profile:
@@ -1417,14 +1200,6 @@ def _task_profile_summary_report(profiled_task: TaskProfileSummary) -> dict[str,
         "name": profiled_task.task.name,
         "description": profiled_task.task.description,
         "profile": profiled_task.profile,
-    }
-
-
-def _task_score_summary_report(scored_task: TaskScoreSummary) -> dict[str, object]:
-    return {
-        "name": scored_task.task.name,
-        "description": scored_task.task.description,
-        "score": scored_task.score,
     }
 
 
