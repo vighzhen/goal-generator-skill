@@ -475,7 +475,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务追问包 JSON | IDE、表单或机器人集成场景需要结构化拿到缺失要素、追问优先级、推荐补法和下一步命令；当前 --questions 只适合人工复制，--explain-missing 又偏解释报告。 | 在 generate_goal.py 新增 --questions-json <description>，输出按优先级排序的 question pack JSON，包含每个缺失要素的 label、why_missing、example、recommended_fill 和 ready_to_generate 标记。 | 待实现 | - |
+| 1 | 单任务追问包 JSON | IDE、表单或机器人集成场景需要结构化拿到缺失要素、追问优先级、推荐补法和下一步命令；当前 --questions 只适合人工复制，--explain-missing 又偏解释报告。 | 在 generate_goal.py 新增 --questions-json <description>，输出按优先级排序的 question pack JSON，包含每个缺失要素的 label、why_missing、example、recommended_fill 和 ready_to_generate 标记。 | 已实现 | 待提交 |
 | 2 | 批量追问 Markdown 包 | 团队批量评审时常需要把每个任务该问需求方的问题直接贴到 PR/群聊；当前 missing-report-md 关注缺失概览，但没有按任务生成可复制的追问文案。 | 在 batch_generate.py 新增 --questions-md <path>，复用筛选/排序/limit/dedupe 后为每个任务输出缺失要素、评分、风险和可直接发送的追问块。 | 待实现 | - |
 
 ### 本轮总结

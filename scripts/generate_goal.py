@@ -375,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.review_card:
             _emit_output(format_review_card(args.review_card), args.output_file)
             return 0
+        if args.questions_json:
+            _emit_output(json.dumps(build_question_pack(args.questions_json), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.suggest_fields:
             _emit_output(json.dumps(suggest_goal_fields(args.suggest_fields), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -420,6 +423,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
     parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
+    parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
@@ -471,6 +475,7 @@ def build_capabilities() -> dict[str, object]:
                 "--score",
                 "--compare",
                 "--review-card",
+                "--questions-json",
                 "--suggest-fields",
                 "--explain-missing",
                 "--list-templates",
@@ -555,6 +560,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "生成 Markdown 评审卡片",
                 "scenario": "需要把一个任务的评分、风险、缺失项和追问文案贴到 PR、Issue 或群聊。",
                 "command": "python3 scripts/generate_goal.py --review-card '给项目加单元测试'",
+            },
+            {
+                "name": "生成机器可读追问包",
+                "scenario": "IDE、表单或机器人需要结构化拿到缺失要素、追问优先级和推荐补法。",
+                "command": "python3 scripts/generate_goal.py --questions-json '给项目加单元测试'",
             },
             {
                 "name": "生成字段建议",
@@ -937,6 +947,56 @@ def format_review_card(description: str) -> str:
     lines.extend(["", "## 可直接发送的追问", ""])
     lines.append(_markdown_block(str(explain.get("next_prompt", ""))))
     return "\n".join(lines)
+
+
+def build_question_pack(description: str) -> dict[str, object]:
+    """生成便于 IDE、表单或机器人消费的结构化追问包。"""
+    if not description.strip():
+        raise ValueError("--questions-json 不能为空，请提供任务描述")
+    analysis = analyze_description(description)
+    profile = build_task_profile(description)
+    score = score_description(description)
+    recommendations = _recommended_field_mapping(profile)
+    missing = _prioritized_missing_keys(analysis["missing"])
+    return {
+        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
+        "ready_to_generate": not missing,
+        "question_count": len(missing),
+        "task_type": profile.get("task_type", {}),
+        "readiness_score": score.get("readiness_score", 0),
+        "readiness_level": score.get("readiness_level", "unknown"),
+        "risk_level": profile.get("risk_level", "unknown"),
+        "risk_score": profile.get("risk_score", 0),
+        "present": analysis["present"],
+        "missing": missing,
+        "ask_strategy": profile.get("ask_strategy", ""),
+        "questions": [_question_pack_item(key, recommendations, index) for index, key in enumerate(missing, start=1)],
+        "next_prompt": format_question_prompt(description),
+        "recommended_command": _question_pack_recommended_command(missing),
+    }
+
+
+def _recommended_field_mapping(profile: dict[str, object]) -> dict[str, object]:
+    recommended_fields = profile.get("recommended_fields", {})
+    return recommended_fields if isinstance(recommended_fields, dict) else {}
+
+
+def _question_pack_item(key: str, recommendations: dict[str, object], priority: int) -> dict[str, object]:
+    return {
+        "priority": priority,
+        "element": key,
+        "label": ELEMENT_LABELS[key],
+        "why_missing": MISSING_REASON_TEMPLATES[key],
+        "example": QUESTION_EXAMPLES[key],
+        "recommended_fill": str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key])),
+        "answer_format": "一句话即可；如已有具体路径、命令、数量或上限，请直接提供。",
+    }
+
+
+def _question_pack_recommended_command(missing: list[str]) -> str:
+    if missing:
+        return "python3 scripts/generate_goal.py --questions '<任务描述>'"
+    return "python3 scripts/generate_goal.py --generate --from-json goal_fields.json"
 
 
 def _review_missing_lines(score: dict[str, object]) -> list[str]:

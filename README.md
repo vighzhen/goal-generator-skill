@@ -83,6 +83,16 @@ python3 scripts/generate_goal.py --review-card "给项目加单元测试"
 
 该功能适合把任务质量评审结果贴到 PR、Issue、评审文档或团队群聊中。
 
+### 生成机器可读追问包
+
+使用 `--questions-json` 可把缺失要素、追问优先级、缺失原因、推荐补法、评分和下一步命令合成结构化 JSON：
+
+```bash
+python3 scripts/generate_goal.py --questions-json "给项目加单元测试"
+```
+
+该功能适合 IDE、表单、机器人或工作流系统读取后自动渲染补信息界面。
+
 ### 生成 6 要素字段建议
 
 使用 `--suggest-fields` 可把任务描述转成可编辑、可机器读取的 6 要素 JSON 草稿；已识别字段会保留输入内容，缺失字段会填入该任务类型下的推荐补全方向：
@@ -367,6 +377,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 单任务 `/goal` 可执行度评分和下一步建议
 - 单任务候选描述可执行度对比
 - 单任务 Markdown 评审卡片
+- 单任务机器可读追问包 JSON
 - 单任务可编辑 6 要素字段建议 JSON
 - 单任务 6 要素字段 JSON 质量校验
 - 批量可编辑 6 要素字段 JSON 草稿导出
