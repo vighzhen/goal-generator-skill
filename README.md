@@ -132,6 +132,12 @@ python3 scripts/generate_goal.py --list-templates
 python3 scripts/generate_goal.py --template bugfix
 ```
 
+如果需要把模板发给需求方填写，也可以输出 Markdown 表格：
+
+```bash
+python3 scripts/generate_goal.py --template-md refactor
+```
+
 ### 查看能力清单
 
 使用 `--capabilities` 可输出当前单任务命令、批量输入格式、批量选项和模板 ID，适合工具集成或快速发现能力：
@@ -391,6 +397,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量缺失要素追问 Markdown 包
 - 缺失 6 要素的原因解释、优先级和补全建议
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
+- 内置任务模板 Markdown 展示
 - 机器可读能力清单输出
 - 机器可读命令示例清单
 - 已有 `/goal` 文件结构校验
