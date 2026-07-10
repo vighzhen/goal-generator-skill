@@ -475,6 +475,7 @@ def build_capabilities() -> dict[str, object]:
                 "--limit",
                 "--list-tasks",
                 "--profile-summary",
+                "--score-summary",
                 "--dedupe",
                 "--check",
                 "--strict",
@@ -558,6 +559,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "批量风险摘要",
                 "scenario": "团队评审时快速查看任务类型、风险等级和缺失要素。",
                 "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-summary --sort-by name",
+            },
+            {
+                "name": "批量可执行度摘要",
+                "scenario": "大清单评审时先按分数识别哪些任务最需要补信息。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --score-summary --sort-by name",
             },
             {
                 "name": "批量缺失要素报告",

@@ -22,6 +22,7 @@ from generate_goal import (
     analyze_description,
     build_task_profile,
     render_goal_text,
+    score_description,
 )
 
 SUPPORTED_SUFFIXES: tuple[str, ...] = (
@@ -101,6 +102,12 @@ class TaskProfileSummary:
 
 
 @dataclass(frozen=True)
+class TaskScoreSummary:
+    task: TaskSpec
+    score: dict[str, object]
+
+
+@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -127,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.score_summary:
+        return _run_score_summary_mode(tasks, args)
     if args.profile_summary:
         return _run_profile_summary_mode(tasks, args)
     if args.list_tasks:
@@ -185,6 +194,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
+    parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -294,6 +304,22 @@ def _run_profile_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -
     return 0
 
 
+def _run_score_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
+    start_time = time.perf_counter()
+    scored_tasks, skipped_tasks = _build_score_summaries(tasks, args.dedupe)
+    summary_only = args.summary_only or args.check
+    if not summary_only:
+        _print_score_summary(scored_tasks)
+    stats = BatchStats(len(scored_tasks), len(skipped_tasks), time.perf_counter() - start_time)
+    if args.report_json:
+        _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json))
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
 def _build_profile_summaries(
     tasks: list[TaskSpec],
     dedupe: bool,
@@ -317,10 +343,39 @@ def _build_profile_summaries(
     return profiled_tasks, skipped_tasks
 
 
+def _build_score_summaries(
+    tasks: list[TaskSpec],
+    dedupe: bool,
+) -> tuple[list[TaskScoreSummary], list[SkippedTask]]:
+    scored_tasks: list[TaskScoreSummary] = []
+    skipped_tasks: list[SkippedTask] = []
+    seen_task_keys: set[str] = set()
+    for task in tasks:
+        if dedupe and _is_duplicate_task(task, seen_task_keys):
+            reason = "重复任务：任务名和描述已出现过"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        if task.load_error:
+            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
+            continue
+        if not task.description:
+            reason = "缺少 description"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        scored_tasks.append(TaskScoreSummary(task, score_description(task.description)))
+    return scored_tasks, skipped_tasks
+
+
 def _print_profile_summary(profiled_tasks: list[TaskProfileSummary]) -> None:
     print("序号\t任务\t类型\t风险\t缺失要素")
     for index, profiled_task in enumerate(profiled_tasks, start=1):
         print(_profile_summary_line(index, profiled_task))
+
+
+def _print_score_summary(scored_tasks: list[TaskScoreSummary]) -> None:
+    print("序号\t任务\t分数\t等级\t风险\t缺失要素")
+    for index, scored_task in enumerate(scored_tasks, start=1):
+        print(_score_summary_line(index, scored_task))
 
 
 def _profile_summary_line(index: int, profiled_task: TaskProfileSummary) -> str:
@@ -333,6 +388,18 @@ def _profile_summary_line(index: int, profiled_task: TaskProfileSummary) -> str:
     missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
     missing_labels = _format_labels(missing_keys)
     return f"{index}\t{profiled_task.task.name}\t{task_label}\t{risk_level}({risk_score})\t{missing_labels}"
+
+
+def _score_summary_line(index: int, scored_task: TaskScoreSummary) -> str:
+    score = scored_task.score
+    readiness_score = str(score.get("readiness_score", ""))
+    readiness_level = str(score.get("readiness_level", "unknown"))
+    risk_level = str(score.get("risk_level", "unknown"))
+    risk_score = str(score.get("risk_score", ""))
+    missing = score.get("missing", [])
+    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
+    missing_labels = _format_labels(missing_keys)
+    return f"{index}\t{scored_task.task.name}\t{readiness_score}\t{readiness_level}\t{risk_level}({risk_score})\t{missing_labels}"
 
 
 def _load_default_values(defaults_json: str | None) -> dict[str, str]:
@@ -1087,6 +1154,23 @@ def _write_profile_summary_report(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_score_summary_report(
+    scored_tasks: list[TaskScoreSummary],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "tasks": [_task_score_summary_report(scored_task) for scored_task in scored_tasks],
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _task_list_report(task: TaskSpec, include_profile: bool = False) -> dict[str, object]:
     report: dict[str, object] = {"name": task.name, "description": task.description}
     if include_profile:
@@ -1099,6 +1183,14 @@ def _task_profile_summary_report(profiled_task: TaskProfileSummary) -> dict[str,
         "name": profiled_task.task.name,
         "description": profiled_task.task.description,
         "profile": profiled_task.profile,
+    }
+
+
+def _task_score_summary_report(scored_task: TaskScoreSummary) -> dict[str, object]:
+    return {
+        "name": scored_task.task.name,
+        "description": scored_task.task.description,
+        "score": scored_task.score,
     }
 
 
