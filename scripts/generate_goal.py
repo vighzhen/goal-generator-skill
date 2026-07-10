@@ -150,7 +150,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "iteration": ("iteration", "迭代策略", "迭代", "提交"),
     "blocked": ("blocked", "受阻停止条件", "阻塞", "停下", "跳过"),
 }
-FIELD_VALUE_TRIM_CHARS = " ;；,，\n\t"
+FIELD_VALUE_TRIM_CHARS = " ;；,，。.\n\t"
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 NUMBER_PATTERN = re.compile(r"\d+")
 BRANCH_PATTERN = re.compile(r"(?:分支|branch)\s*[`'\"]?([A-Za-z0-9._/-]+)")

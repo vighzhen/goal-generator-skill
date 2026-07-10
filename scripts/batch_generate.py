@@ -27,6 +27,14 @@ DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
 TASK_SEPARATOR = "\n\n"
 SUMMARY_TEMPLATE = "处理完成：成功 {success_count} 个，跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
+FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
+    "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
+    "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容"),
+    "boundaries": ("边界", "范围", "仅", "只", "目录", "排除", "src/", "tests/"),
+    "iteration": ("迭代", "每个", "每次", "逐个", "commit", "提交", "预期"),
+    "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少"),
+}
 
 
 @dataclass(frozen=True)
@@ -217,8 +225,32 @@ def _merge_description_present(
 
 
 def _description_fallback(key: str, description: str) -> str:
+    clauses = _description_clauses(description)
     if key == "outcome":
-        return description.strip().splitlines()[0]
+        return clauses[0] if clauses else _normalize_description(description)
+    return _matching_clause(clauses, FALLBACK_HINTS.get(key, ())) or _normalize_description(description)
+
+
+def _description_clauses(description: str) -> list[str]:
+    return [clause.strip() for clause in CLAUSE_SPLIT_PATTERN.split(description) if clause.strip()]
+
+
+def _matching_clause(clauses: list[str], hints: tuple[str, ...]) -> str:
+    for clause in clauses:
+        if any(hint.lower() in clause.lower() for hint in hints):
+            return _strip_field_label(clause)
+    return ""
+
+
+def _strip_field_label(clause: str) -> str:
+    if "：" in clause:
+        return clause.split("：", 1)[1].strip()
+    if ":" in clause:
+        return clause.split(":", 1)[1].strip()
+    return clause
+
+
+def _normalize_description(description: str) -> str:
     return " ".join(description.strip().split())
 
 
