@@ -137,7 +137,7 @@ MAX_INTERACTIVE_ROUNDS = 3
 INTERACTIVE_DEFAULTS: dict[str, str] = {
     "outcome": "完成用户描述的编码任务，并在最终回复中列出实际交付物",
     "verification": "每个改动后运行最相关的现有验证命令，最终执行语法检查或项目可用测试",
-    "constraints": "不改变既有功能行为，不引入未经确认的新依赖，不做范围外重构",
+    "constraints": "不改变与目标无关的既有功能行为，不引入未经确认的新依赖，不做范围外重构",
     "boundaries": "仅处理用户描述中直接相关的文件和目录，范围外问题只记录",
     "iteration": "每个独立改动验证通过后单独 git add + git commit，预期 3-8 个 commit",
     "blocked": "遇到必须由用户决定的业务行为变化、无法验证的关键风险或范围冲突时停下询问",
