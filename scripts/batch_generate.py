@@ -119,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
         required_explicit_fields = _required_explicit_fields_from_args(args)
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
+        require_task_path = _require_task_path_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -206,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         max_defaulted_fields,
         required_explicit_fields,
         forbidden_default_fields,
+        require_task_path,
     )
     output_lint_report = None
     if args.lint_output:
@@ -253,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
         return 1
     if forbidden_default_fields and _has_forbidden_default_skips(skipped_tasks):
+        return 1
+    if require_task_path and _has_required_path_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -307,6 +311,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--forbid-default-fields",
         help="真实生成、dry-run、check 或 lint-output 时禁止指定 6 要素使用默认值兜底，多个字段用逗号分隔。",
+    )
+    parser.add_argument(
+        "--require-task-path",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求每个任务提供 path/inspect_path/target_path。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -396,6 +405,25 @@ def _forbidden_default_fields_from_args(args: argparse.Namespace) -> list[str]:
     ):
         raise ValueError("--forbid-default-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return _field_list_from_value(forbidden_fields_value, "--forbid-default-fields")
+
+
+def _require_task_path_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_task_path:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-task-path 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
 
 
 def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
@@ -2575,6 +2603,7 @@ def _process_tasks(
     max_defaulted_fields: int | None = None,
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
+    require_task_path: bool = False,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2597,6 +2626,7 @@ def _process_tasks(
                 max_defaulted_fields,
                 required_explicit_fields or [],
                 forbidden_default_fields or [],
+                require_task_path,
             )
             outputs.append(output)
         except (ValueError, OSError) as error:
@@ -2622,6 +2652,8 @@ def _dedupe_key(task: TaskSpec) -> str:
 def _skip_suggestion(reason: str) -> str:
     if "缺少 description" in reason:
         return "为该任务补充 description 字段，说明编码目标和上下文。"
+    if "缺少任务路径" in reason:
+        return "为该任务补充 path、inspect_path 或 target_path，指向本地文件或目录。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
@@ -2650,11 +2682,14 @@ def _process_one_task(
     max_defaulted_fields: int | None = None,
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
+    require_task_path: bool = False,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
+    if require_task_path and not task.inspect_path:
+        raise ValueError(_required_task_path_error())
     missing_explicit_fields = _missing_explicit_fields(task, required_explicit_fields or [])
     if missing_explicit_fields:
         raise ValueError(_missing_explicit_fields_error(missing_explicit_fields))
@@ -2688,6 +2723,14 @@ def _defaulted_limit_error(defaulted_keys: list[str], max_defaulted_fields: int)
 
 def _has_defaulted_limit_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("超过 --max-defaulted-fields" in skipped.reason for skipped in skipped_tasks)
+
+
+def _required_task_path_error() -> str:
+    return "缺少任务路径：--require-task-path 要求提供 path、inspect_path 或 target_path"
+
+
+def _has_required_path_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("缺少任务路径" in skipped.reason for skipped in skipped_tasks)
 
 
 def _forbidden_defaulted_fields(defaulted_keys: list[str], forbidden_fields: list[str]) -> list[str]:

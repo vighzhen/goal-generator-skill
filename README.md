@@ -311,6 +311,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --merge-sup
 # 严格模式：缺失 6 要素的任务会跳过，不使用默认填充
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --strict
 
+# 路径必填门禁：每个任务必须提供 path/inspect_path/target_path 作为代码上下文锚点
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-task-path --report-json batch_report.json
+
 # 默认填充数量门禁：每个任务最多允许默认填充 2 个要素，超限任务会跳过并返回非零退出码
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-defaulted-fields 2 --report-json batch_report.json
 
@@ -386,6 +389,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1；`--enrich-from-paths` 会把路径画像中的 `suggested_fields` 回填到缺失或仅由描述启发式推断的 6 要素，不覆盖用户显式填写的字段。
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
+- `--require-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；没有 `path`、`inspect_path` 或 `target_path` 的任务会跳过并让命令返回非零退出码，适合要求批量任务全部绑定代码上下文锚点的团队。
 - `--max-defaulted-fields <0-6>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；当某任务默认填充数量超过阈值时，该任务会跳过并让命令返回非零退出码，适合在完全 `--strict` 前做渐进式质量门禁。
 - `--require-explicit-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，多个字段用逗号、分号、顿号或换行分隔。被要求的字段必须来自任务 `fields` 或 `description` 中的显式标签，不能只靠描述启发式推断或默认值兜底。
 - `--forbid-default-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表同样支持 6 要素 key、英文标签或中文标签。被禁止默认的字段可以来自任务 `fields`、`description` 显式标签或描述启发式识别，但不能落到默认值兜底。
