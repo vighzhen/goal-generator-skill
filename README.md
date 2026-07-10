@@ -200,7 +200,7 @@ python3 scripts/generate_goal.py --lint-goal-bundle all_goals.txt
 python3 scripts/generate_goal.py --lint-goal-dir output/
 ```
 
-命令按文件名稳定扫描目录直属 `.txt` 文件，输出 `file_count`、`passed_count`、`failed_count`、每个文件的结构与语义质量结果；任一文件未通过或目录内没有 `.txt` 目标文件时退出码为 1，适合批量生成后的 CI 或交付前质量门禁。
+命令按文件名稳定扫描目录直属 `.txt` 文件，输出 `file_count`、`passed_count`、`failed_count`、每个文件的结构与语义质量结果；如果某个 `.txt` 内包含多个标准 `/goal` 分隔块或分隔线不配对，会自动按合集文件逐段检查并在该文件报告中嵌入 `bundle` 详情。任一文件或任一合集块未通过、目录内没有 `.txt` 目标文件时退出码为 1，适合批量生成后的 CI 或交付前质量门禁。
 
 ### 递归检查 /goal 输出目录树
 
@@ -210,7 +210,7 @@ python3 scripts/generate_goal.py --lint-goal-dir output/
 python3 scripts/generate_goal.py --lint-goal-tree output/
 ```
 
-命令会跳过 `.git`、缓存目录、依赖目录和构建产物目录，按相对路径稳定排序输出 `file_count`、`passed_count`、`failed_count`、`skipped_directories` 和每个文件的 `relative_path`、结构校验与语义质量结果；任一文件未通过或目录树内没有 `.txt` 目标文件时退出码为 1。若只想检查目录直属文件，继续使用 `--lint-goal-dir`。
+命令会跳过 `.git`、缓存目录、依赖目录和构建产物目录，按相对路径稳定排序输出 `file_count`、`passed_count`、`failed_count`、`skipped_directories` 和每个文件的 `relative_path`、结构校验与语义质量结果；遇到合集文件时同样自动逐段检查并嵌入 `bundle` 详情。任一文件或任一合集块未通过、目录树内没有 `.txt` 目标文件时退出码为 1。若只想检查目录直属文件，继续使用 `--lint-goal-dir`。
 
 ### 交互模式
 

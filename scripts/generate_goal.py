@@ -739,14 +739,19 @@ def lint_goal_bundle(goal_file: str) -> dict[str, object]:
         raise ValueError(f"--lint-goal-bundle 不存在：{goal_file}")
     if not goal_path.is_file():
         raise ValueError(f"--lint-goal-bundle 必须是文件：{goal_file}")
-    lines = goal_path.read_text(encoding="utf-8").splitlines()
+    return lint_goal_bundle_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def lint_goal_bundle_text(goal_text: str, source: str = "") -> dict[str, object]:
+    """逐段校验同一文本中的多个 /goal 指令。"""
+    lines = goal_text.splitlines()
     blocks, bundle_issues = _goal_bundle_blocks(lines)
-    goal_reports = [_goal_bundle_block_report(goal_path, block) for block in blocks]
+    goal_reports = [_goal_bundle_block_report(source, block) for block in blocks]
     failed_reports = [report for report in goal_reports if not report["passed"]]
     passed = bool(blocks) and not bundle_issues and not failed_reports
     return {
         "passed": passed,
-        "source": str(goal_path),
+        "source": source,
         "goal_count": len(blocks),
         "passed_count": len(blocks) - len(failed_reports),
         "failed_count": len(failed_reports),
@@ -903,9 +908,9 @@ def _goal_bundle_task_name(lines: list[str], start_line: int) -> str:
     return ""
 
 
-def _goal_bundle_block_report(goal_path: Path, block: dict[str, object]) -> dict[str, object]:
+def _goal_bundle_block_report(source_path: str, block: dict[str, object]) -> dict[str, object]:
     goal_index = int(block["goal_index"])
-    source = f"{goal_path}#goal-{goal_index}"
+    source = f"{source_path}#goal-{goal_index}" if source_path else f"goal-{goal_index}"
     lint_report = lint_goal_text(str(block["text"]), source)
     field_lint = lint_report.get("field_lint", {})
     validation = lint_report.get("validation", {})
@@ -927,7 +932,10 @@ def _goal_bundle_block_report(goal_path: Path, block: dict[str, object]) -> dict
 
 
 def _goal_dir_file_report(goal_file: Path) -> dict[str, object]:
-    lint_report = lint_goal_text(goal_file.read_text(encoding="utf-8"), str(goal_file))
+    goal_text = goal_file.read_text(encoding="utf-8")
+    if _goal_text_requires_bundle_lint(goal_text):
+        return _goal_dir_bundle_file_report(goal_file, lint_goal_bundle_text(goal_text, str(goal_file)))
+    lint_report = lint_goal_text(goal_text, str(goal_file))
     field_lint = lint_report.get("field_lint", {})
     validation = lint_report.get("validation", {})
     issues = field_lint.get("issues", []) if isinstance(field_lint, dict) else []
@@ -942,6 +950,130 @@ def _goal_dir_file_report(goal_file: Path) -> dict[str, object]:
         "issues": issues if isinstance(issues, list) else [],
         "summary": lint_report["summary"],
     }
+
+
+def _goal_text_requires_bundle_lint(goal_text: str) -> bool:
+    start_count = 0
+    end_count = 0
+    for line in goal_text.splitlines():
+        stripped_line = line.strip()
+        if stripped_line == SEPARATOR_START:
+            start_count += 1
+        elif stripped_line == SEPARATOR_END:
+            end_count += 1
+    return start_count > 1 or end_count > 1 or start_count != end_count
+
+
+def _goal_dir_bundle_file_report(goal_file: Path, bundle_report: dict[str, object]) -> dict[str, object]:
+    goal_reports = _bundle_goal_reports(bundle_report)
+    bundle_issues = _object_dict_list(bundle_report.get("bundle_issues"))
+    return {
+        "path": str(goal_file),
+        "passed": bundle_report["passed"],
+        "validation_valid": _bundle_validation_valid(goal_reports, bundle_issues),
+        "score": _bundle_min_score(goal_reports),
+        "issue_count": _bundle_issue_count(goal_reports, bundle_issues),
+        "high_issue_count": _bundle_high_issue_count(goal_reports, bundle_issues),
+        "missing": [],
+        "issues": _goal_dir_bundle_issues(bundle_report, goal_reports, bundle_issues),
+        "bundle": bundle_report,
+        "summary": bundle_report["summary"],
+    }
+
+
+def _bundle_goal_reports(bundle_report: dict[str, object]) -> list[dict[str, object]]:
+    goals = bundle_report.get("goals", [])
+    if not isinstance(goals, list):
+        return []
+    return [goal for goal in goals if isinstance(goal, dict)]
+
+
+def _object_dict_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _bundle_validation_valid(goal_reports: list[dict[str, object]], bundle_issues: list[dict[str, object]]) -> bool:
+    return bool(goal_reports) and not bundle_issues and all(bool(goal.get("validation_valid")) for goal in goal_reports)
+
+
+def _bundle_min_score(goal_reports: list[dict[str, object]]) -> int:
+    scores = [int(goal.get("score", 0)) for goal in goal_reports]
+    return min(scores) if scores else 0
+
+
+def _bundle_issue_count(goal_reports: list[dict[str, object]], bundle_issues: list[dict[str, object]]) -> int:
+    return len(bundle_issues) + sum(int(goal.get("issue_count", 0)) for goal in goal_reports)
+
+
+def _bundle_high_issue_count(goal_reports: list[dict[str, object]], bundle_issues: list[dict[str, object]]) -> int:
+    return len(bundle_issues) + sum(int(goal.get("high_issue_count", 0)) for goal in goal_reports)
+
+
+def _goal_dir_bundle_issues(
+    bundle_report: dict[str, object],
+    goal_reports: list[dict[str, object]],
+    bundle_issues: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    issues = [_bundle_separator_issue(issue) for issue in bundle_issues]
+    for goal in goal_reports:
+        if goal.get("passed") and not _object_dict_list(goal.get("issues")):
+            continue
+        issues.extend(_bundle_goal_issues(goal))
+    if not issues and not bundle_report.get("passed"):
+        issues.append(
+            {
+                "element": "bundle",
+                "label": "合集文件",
+                "severity": "high",
+                "message": str(bundle_report.get("summary", "合集文件检查未通过")),
+                "suggestion": "查看 bundle.goals 与 bundle.bundle_issues 定位失败块。",
+            }
+        )
+    return issues
+
+
+def _bundle_separator_issue(issue: dict[str, object]) -> dict[str, object]:
+    line = issue.get("line", "?")
+    return {
+        "element": "bundle",
+        "label": "合集分隔线",
+        "severity": "high",
+        "message": f"第 {line} 行：{issue.get('message', '')}",
+        "suggestion": str(issue.get("suggestion", "")),
+    }
+
+
+def _bundle_goal_issues(goal: dict[str, object]) -> list[dict[str, object]]:
+    issues = _object_dict_list(goal.get("issues"))
+    goal_prefix = _bundle_goal_label(goal)
+    if not issues:
+        return [
+            {
+                "element": "bundle_goal",
+                "label": goal_prefix,
+                "severity": "high",
+                "message": str(goal.get("summary", "合集块检查未通过")),
+                "suggestion": "查看 bundle.goals 中该块的结构校验与语义质量详情。",
+            }
+        ]
+    enriched_issues: list[dict[str, object]] = []
+    for issue in issues:
+        enriched_issue = dict(issue)
+        enriched_issue["goal_index"] = goal.get("goal_index")
+        enriched_issue["task_name"] = goal.get("task_name", "")
+        enriched_issue["label"] = f"{goal_prefix} / {issue.get('label', issue.get('element', '未知要素'))}"
+        enriched_issues.append(enriched_issue)
+    return enriched_issues
+
+
+def _bundle_goal_label(goal: dict[str, object]) -> str:
+    task_name = str(goal.get("task_name", "")).strip()
+    goal_index = goal.get("goal_index", "?")
+    if task_name:
+        return f"合集块 {goal_index}（{task_name}）"
+    return f"合集块 {goal_index}"
 
 
 def _goal_tree_file_report(root: Path, goal_file: Path) -> dict[str, object]:
