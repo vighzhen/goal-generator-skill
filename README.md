@@ -317,6 +317,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 路径存在门禁：每个任务路径字段必须指向当前工作目录下已存在的文件或目录
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-existing-task-path --report-json batch_report.json
 
+# 路径根目录白名单门禁：每个任务路径必须位于 scripts/ 或 src/ 之内
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --allowed-path-roots scripts,src --report-json batch_report.json
+
 # 默认填充数量门禁：每个任务最多允许默认填充 2 个要素，超限任务会跳过并返回非零退出码
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-defaulted-fields 2 --report-json batch_report.json
 
@@ -394,6 +397,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--require-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；没有 `path`、`inspect_path` 或 `target_path` 的任务会跳过并让命令返回非零退出码，适合要求批量任务全部绑定代码上下文锚点的团队。
 - `--require-existing-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务缺少路径字段或路径不存在时会跳过并返回非零退出码，适合生成前确保批量任务路径锚点在当前仓库中真实可访问。
+- `--allowed-path-roots <根目录列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务路径必须位于任一允许根目录内，根目录列表用逗号、分号、顿号或换行分隔。该门禁会要求任务提供路径字段，但不单独检查路径存在性；如需同时检查存在性可配合 `--require-existing-task-path`。
 - `--max-defaulted-fields <0-6>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；当某任务默认填充数量超过阈值时，该任务会跳过并让命令返回非零退出码，适合在完全 `--strict` 前做渐进式质量门禁。
 - `--require-explicit-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，多个字段用逗号、分号、顿号或换行分隔。被要求的字段必须来自任务 `fields` 或 `description` 中的显式标签，不能只靠描述启发式推断或默认值兜底。
 - `--forbid-default-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表同样支持 6 要素 key、英文标签或中文标签。被禁止默认的字段可以来自任务 `fields`、`description` 显式标签或描述启发式识别，但不能落到默认值兜底。

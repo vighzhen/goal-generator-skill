@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
         require_task_path = _require_task_path_from_args(args)
         require_existing_task_path = _require_existing_task_path_from_args(args)
+        allowed_path_roots = _allowed_path_roots_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -210,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         forbidden_default_fields,
         require_task_path,
         require_existing_task_path,
+        allowed_path_roots,
     )
     output_lint_report = None
     if args.lint_output:
@@ -261,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     if require_task_path and _has_required_path_skips(skipped_tasks):
         return 1
     if require_existing_task_path and (_has_required_path_skips(skipped_tasks) or _has_missing_existing_path_skips(skipped_tasks)):
+        return 1
+    if allowed_path_roots and (_has_required_path_skips(skipped_tasks) or _has_allowed_path_root_skips(skipped_tasks)):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -325,6 +329,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-existing-task-path",
         action="store_true",
         help="真实生成、dry-run、check 或 lint-output 时要求任务 path/inspect_path/target_path 在本地存在。",
+    )
+    parser.add_argument(
+        "--allowed-path-roots",
+        help="真实生成、dry-run、check 或 lint-output 时要求任务路径位于指定根目录内，多个根目录用逗号分隔。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -452,6 +460,40 @@ def _require_existing_task_path_from_args(args: argparse.Namespace) -> bool:
     ):
         raise ValueError("--require-existing-task-path 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return True
+
+
+def _allowed_path_roots_from_args(args: argparse.Namespace) -> list[Path]:
+    allowed_roots_value = args.allowed_path_roots
+    if allowed_roots_value is None:
+        return []
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--allowed-path-roots 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw_root in DEPENDENCY_SPLIT_PATTERN.split(allowed_roots_value):
+        root_value = raw_root.strip()
+        if not root_value:
+            continue
+        root = _resolved_path(root_value)
+        root_key = str(root)
+        if root_key in seen:
+            continue
+        roots.append(root)
+        seen.add(root_key)
+    if not roots:
+        raise ValueError("--allowed-path-roots 必须包含至少一个路径根目录")
+    return roots
 
 
 def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
@@ -2633,6 +2675,7 @@ def _process_tasks(
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
     require_existing_task_path: bool = False,
+    allowed_path_roots: list[Path] | None = None,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2657,6 +2700,7 @@ def _process_tasks(
                 forbidden_default_fields or [],
                 require_task_path,
                 require_existing_task_path,
+                allowed_path_roots or [],
             )
             outputs.append(output)
         except (ValueError, OSError) as error:
@@ -2686,6 +2730,8 @@ def _skip_suggestion(reason: str) -> str:
         return "为该任务补充 path、inspect_path 或 target_path，指向本地文件或目录。"
     if "任务路径不存在" in reason:
         return "修正 path、inspect_path 或 target_path，确保其相对当前工作目录存在且可访问。"
+    if "任务路径超出允许根目录" in reason:
+        return "把任务 path 调整到允许根目录内，或确认范围后扩展 --allowed-path-roots。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
@@ -2716,6 +2762,7 @@ def _process_one_task(
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
     require_existing_task_path: bool = False,
+    allowed_path_roots: list[Path] | None = None,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
@@ -2725,6 +2772,11 @@ def _process_one_task(
         raise ValueError(_required_task_path_error())
     if require_existing_task_path and not Path(task.inspect_path).exists():
         raise ValueError(_missing_existing_task_path_error(task.inspect_path))
+    if allowed_path_roots:
+        if not task.inspect_path:
+            raise ValueError(_required_task_path_error())
+        if not _path_inside_allowed_roots(task.inspect_path, allowed_path_roots):
+            raise ValueError(_allowed_path_roots_error(task.inspect_path, allowed_path_roots))
     missing_explicit_fields = _missing_explicit_fields(task, required_explicit_fields or [])
     if missing_explicit_fields:
         raise ValueError(_missing_explicit_fields_error(missing_explicit_fields))
@@ -2774,6 +2826,38 @@ def _missing_existing_task_path_error(task_path: str) -> str:
 
 def _has_missing_existing_path_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("任务路径不存在" in skipped.reason for skipped in skipped_tasks)
+
+
+def _path_inside_allowed_roots(task_path: str, allowed_roots: list[Path]) -> bool:
+    resolved_path = _resolved_path(task_path)
+    return any(_path_is_relative_to(resolved_path, root) for root in allowed_roots)
+
+
+def _resolved_path(raw_path: str) -> Path:
+    return Path(raw_path).expanduser().resolve(strict=False)
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _allowed_path_roots_error(task_path: str, allowed_roots: list[Path]) -> str:
+    return (
+        f"任务路径超出允许根目录：{task_path}；"
+        f"--allowed-path-roots 允许：{_format_allowed_roots(allowed_roots)}"
+    )
+
+
+def _format_allowed_roots(allowed_roots: list[Path]) -> str:
+    return "、".join(str(root) for root in allowed_roots)
+
+
+def _has_allowed_path_root_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("任务路径超出允许根目录" in skipped.reason for skipped in skipped_tasks)
 
 
 def _forbidden_defaulted_fields(defaulted_keys: list[str], forbidden_fields: list[str]) -> list[str]:
