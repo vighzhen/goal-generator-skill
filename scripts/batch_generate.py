@@ -23,15 +23,7 @@ from generate_goal import (
     render_goal_text,
 )
 
-SUPPORTED_SUFFIXES: tuple[str, ...] = (
-    ".json",
-    ".jsonl",
-    ".csv",
-    ".yaml",
-    ".yml",
-    ".md",
-    ".markdown",
-)
+SUPPORTED_SUFFIXES: tuple[str, ...] = (".json", ".csv")
 SLUG_MAX_LENGTH = 50
 DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
@@ -46,16 +38,7 @@ FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "iteration": ("迭代", "每个", "每次", "逐个", "commit", "提交", "预期"),
     "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少"),
 }
-MARKDOWN_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
-    "name": ("name", "任务", "任务名", "名称", "title", "标题"),
-    "description": ("description", "描述", "需求", "任务描述", "request", "prompt"),
-    "outcome": ("outcome", "目标结果", "目标", "交付"),
-    "verification": ("verification", "验证方式", "验证", "验收"),
-    "constraints": ("constraints", "约束", "限制", "不能"),
-    "boundaries": ("boundaries", "边界", "范围", "目录"),
-    "iteration": ("iteration", "迭代策略", "迭代", "提交"),
-    "blocked": ("blocked", "受阻停止条件", "阻塞", "停下", "跳过"),
-}
+
 
 
 @dataclass(frozen=True)
@@ -113,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     start_time = time.perf_counter()
     try:
-        tasks = _load_tasks_from_input(_input_value_from_args(args), args.stdin_format)
+        tasks = _load_tasks_from_input(_input_value_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
         tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
@@ -153,8 +136,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
     parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
-    parser.add_argument("--input", help="输入文件路径，支持 .json、.jsonl、.csv、.yaml、.yml、.md 或 .markdown。")
-    parser.add_argument("--stdin-format", choices=("json", "jsonl"), default="jsonl", help="当输入为 - 时使用的 stdin 格式。")
+    parser.add_argument("--input", help="输入文件路径，支持 .json 或 .csv。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
@@ -182,18 +164,10 @@ def _input_value_from_args(args: argparse.Namespace) -> str:
     return input_value
 
 
-def _load_tasks_from_input(input_value: str, stdin_format: str) -> list[TaskSpec]:
+def _load_tasks_from_input(input_value: str) -> list[TaskSpec]:
     if input_value == "-":
-        return _load_stdin_tasks(sys.stdin.read(), stdin_format)
+        raise ValueError("标准输入任务流已移除，请改用 .json 或 .csv 文件")
     return _load_tasks(Path(input_value))
-
-
-def _load_stdin_tasks(text: str, stdin_format: str) -> list[TaskSpec]:
-    if stdin_format == "json":
-        return _tasks_from_json_data(json.loads(text))
-    if stdin_format == "jsonl":
-        return _load_jsonl_lines(text.splitlines())
-    raise ValueError(f"不支持的 stdin 格式：{stdin_format}")
 
 
 def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
@@ -275,14 +249,8 @@ def _load_tasks(input_path: Path) -> list[TaskSpec]:
     suffix = input_path.suffix.lower()
     if suffix == ".json":
         return _load_json_tasks(input_path)
-    if suffix == ".jsonl":
-        return _load_jsonl_tasks(input_path)
     if suffix == ".csv":
         return _load_csv_tasks(input_path)
-    if suffix in {".yaml", ".yml"}:
-        return _load_yaml_tasks(input_path)
-    if suffix in {".md", ".markdown"}:
-        return _load_markdown_tasks(input_path)
     supported = "、".join(SUPPORTED_SUFFIXES)
     raise ValueError(f"不支持的输入格式：{suffix}，仅支持 {supported}")
 
@@ -310,31 +278,6 @@ def _task_from_json_item(item: dict[str, Any], index: int) -> TaskSpec:
     return TaskSpec(name=name, description=description, fields=fields)
 
 
-def _load_jsonl_tasks(input_path: Path) -> list[TaskSpec]:
-    return _load_jsonl_lines(input_path.read_text(encoding="utf-8").splitlines())
-
-
-def _load_jsonl_lines(lines: list[str]) -> list[TaskSpec]:
-    tasks: list[TaskSpec] = []
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        tasks.append(_task_from_jsonl_line(stripped, line_number, len(tasks) + 1))
-    if not tasks:
-        raise ValueError("JSONL 文件没有可读取的任务行")
-    return tasks
-
-
-def _task_from_jsonl_line(line: str, line_number: int, task_index: int) -> TaskSpec:
-    try:
-        item = json.loads(line)
-    except json.JSONDecodeError as error:
-        return _invalid_task(task_index, f"line-{line_number}", f"JSONL 第 {line_number} 行解析失败：{error.msg}")
-    if not isinstance(item, dict):
-        return _invalid_task(task_index, f"line-{line_number}", f"JSONL 第 {line_number} 行必须是对象")
-    return _task_from_json_item(item, task_index)
-
 
 def _load_csv_tasks(input_path: Path) -> list[TaskSpec]:
     with input_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
@@ -342,172 +285,6 @@ def _load_csv_tasks(input_path: Path) -> list[TaskSpec]:
         if not reader.fieldnames:
             raise ValueError("CSV 文件缺少表头")
         return [_task_from_csv_row(row, index) for index, row in enumerate(reader, start=1)]
-
-
-def _load_yaml_tasks(input_path: Path) -> list[TaskSpec]:
-    items = _parse_yaml_task_items(input_path.read_text(encoding="utf-8").splitlines())
-    if not items:
-        raise ValueError("YAML 文件没有可读取的任务项")
-    return [_task_from_yaml_item(item, index) for index, item in enumerate(items, start=1)]
-
-
-def _parse_yaml_task_items(lines: list[str]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    current: dict[str, Any] | None = None
-    in_fields = False
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        if stripped.startswith("- "):
-            if current is not None:
-                items.append(current)
-            current = {"fields": {}}
-            in_fields = _consume_yaml_entry(current, stripped[2:].strip(), False, line_number)
-            continue
-        if current is None:
-            raise ValueError("YAML 顶层必须是任务列表")
-        if indent <= 2:
-            in_fields = False
-        in_fields = _consume_yaml_entry(current, stripped, in_fields and indent >= 4, line_number) or in_fields
-    if current is not None:
-        items.append(current)
-    return items
-
-
-def _consume_yaml_entry(item: dict[str, Any], entry: str, in_fields: bool, line_number: int) -> bool:
-    if not entry:
-        return in_fields
-    key, value = _yaml_key_value(entry, line_number)
-    canonical_key = _canonical_yaml_key(key)
-    if canonical_key == "fields" and not value:
-        item.setdefault("fields", {})
-        return True
-    _assign_yaml_value(item, canonical_key, value, in_fields)
-    return False
-
-
-def _yaml_key_value(entry: str, line_number: int) -> tuple[str, str]:
-    if ":" not in entry:
-        raise ValueError(f"YAML 第 {line_number} 行缺少 key: value 结构")
-    key, value = entry.split(":", 1)
-    return key.strip(), _yaml_scalar(value.strip())
-
-
-def _yaml_scalar(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
-
-
-def _canonical_yaml_key(key: str) -> str:
-    normalized = re.sub(r"[`*_\\s-]+", "", key.lower())
-    for canonical, aliases in MARKDOWN_COLUMN_ALIASES.items():
-        alias_set = {re.sub(r"[`*_\\s-]+", "", alias.lower()) for alias in aliases}
-        if normalized in alias_set:
-            return canonical
-    return normalized
-
-
-def _assign_yaml_value(item: dict[str, Any], key: str, value: str, in_fields: bool) -> None:
-    if in_fields or key in ELEMENT_ORDER:
-        if key in ELEMENT_ORDER:
-            item.setdefault("fields", {})[key] = value
-        return
-    if key in {"name", "description"}:
-        item[key] = value
-
-
-def _task_from_yaml_item(item: dict[str, Any], index: int) -> TaskSpec:
-    name = _string_value(item.get("name")) or _default_task_name(index)
-    description = _string_value(item.get("description"))
-    fields = _fields_from_mapping(item.get("fields"))
-    return TaskSpec(name=name, description=description, fields=fields)
-
-
-def _load_markdown_tasks(input_path: Path) -> list[TaskSpec]:
-    lines = input_path.read_text(encoding="utf-8").splitlines()
-    for index in range(len(lines) - 1):
-        headers = _markdown_cells(lines[index])
-        separators = _markdown_cells(lines[index + 1])
-        if not _is_markdown_table_header(headers, separators):
-            continue
-        columns = [_canonical_markdown_column(header) for header in headers]
-        if "description" not in columns:
-            continue
-        rows = _markdown_table_rows(lines[index + 2 :], len(columns))
-        return [_task_from_markdown_row(row, columns, row_index) for row_index, row in enumerate(rows, start=1)]
-    raise ValueError("未找到包含 description/描述 列的 Markdown 任务表格")
-
-
-def _markdown_table_rows(lines: list[str], width: int) -> list[list[str]]:
-    rows: list[list[str]] = []
-    for line in lines:
-        cells = _markdown_cells(line)
-        if not cells:
-            break
-        rows.append(_normalize_markdown_row(cells, width))
-    return rows
-
-
-def _task_from_markdown_row(row: list[str], columns: list[str], index: int) -> TaskSpec:
-    values = {column: row[position] for position, column in enumerate(columns) if column}
-    name = _string_value(values.get("name")) or _default_task_name(index)
-    description = _string_value(values.get("description"))
-    fields = {key: _string_value(values.get(key)) for key in ELEMENT_ORDER}
-    return TaskSpec(name=name, description=description, fields=_remove_empty_fields(fields))
-
-
-def _markdown_cells(line: str) -> list[str]:
-    stripped = line.strip()
-    if not stripped.startswith("|") or "|" not in stripped[1:]:
-        return []
-    content = stripped.strip("|")
-    cells: list[str] = []
-    current: list[str] = []
-    escaped = False
-    for character in content:
-        if escaped:
-            current.append(character)
-            escaped = False
-            continue
-        if character == "\\":
-            escaped = True
-            continue
-        if character == "|":
-            cells.append(_clean_markdown_cell("".join(current)))
-            current = []
-            continue
-        current.append(character)
-    cells.append(_clean_markdown_cell("".join(current)))
-    return cells
-
-
-def _clean_markdown_cell(value: str) -> str:
-    return value.replace("<br>", "\n").replace("<br/>", "\n").strip()
-
-
-def _is_markdown_table_header(headers: list[str], separators: list[str]) -> bool:
-    return bool(headers) and len(headers) == len(separators) and all(_is_separator_cell(cell) for cell in separators)
-
-
-def _is_separator_cell(cell: str) -> bool:
-    return bool(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")))
-
-
-def _canonical_markdown_column(header: str) -> str:
-    normalized = re.sub(r"[`*_\\s-]+", "", header.lower())
-    for key, aliases in MARKDOWN_COLUMN_ALIASES.items():
-        if normalized in {re.sub(r"[`*_\\s-]+", "", alias.lower()) for alias in aliases}:
-            return key
-    return ""
-
-
-def _normalize_markdown_row(cells: list[str], width: int) -> list[str]:
-    normalized = cells[:width]
-    return normalized + [""] * (width - len(normalized))
-
 
 def _task_from_csv_row(row: dict[str, str | None], index: int) -> TaskSpec:
     name = _string_value(row.get("name")) or _default_task_name(index)
@@ -577,12 +354,10 @@ def _skip_suggestion(reason: str) -> str:
         return "为该任务补充 description 字段，说明编码目标和上下文。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
-    if "JSONL" in reason and "解析失败" in reason:
-        return "检查对应行是否是单行合法 JSON 对象，字符串内部双引号需要转义。"
     if "必须是对象" in reason:
         return "把该任务改成包含 name、description、fields 的对象。"
     if "不支持的输入格式" in reason:
-        return f"改用 {'、'.join(SUPPORTED_SUFFIXES)} 输入文件。"
+        return f"改用 {'、'.join(SUPPORTED_SUFFIXES)} 输入文件；JSON/CSV 之外的格式已在清理中移除。"
     if "重复任务" in reason:
         return "确认是否确实重复；如需全部保留，请移除 --dedupe。"
     return "检查输入文件格式和任务字段后重试。"

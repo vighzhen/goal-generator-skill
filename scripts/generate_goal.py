@@ -530,10 +530,9 @@ def build_capabilities() -> dict[str, object]:
             "template_ids": [template["id"] for template in list_task_templates()],
         },
         "batch": {
-            "formats": ["json", "jsonl", "csv", "yaml", "markdown", "stdin-json", "stdin-jsonl"],
+            "formats": ["json", "csv"],
             "options": [
                 "--input",
-                "--stdin-format",
                 "--defaults-json",
                 "GOAL_GENERATOR_DEFAULTS_JSON",
                 "--filter",
