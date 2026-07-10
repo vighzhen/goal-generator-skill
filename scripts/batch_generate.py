@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.verbose)
+    outputs, skipped_tasks = _process_tasks(tasks, args.dry_run, args.strict, args.dedupe, args.verbose)
     _write_outputs(outputs, args.output_dir, args.output_file)
     elapsed_seconds = time.perf_counter() - start_time
     stats = BatchStats(len(outputs), len(skipped_tasks), elapsed_seconds)
@@ -124,6 +124,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
+    parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--strict", action="store_true", help="缺失 6 要素时跳过任务，不使用默认填充。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
@@ -326,12 +327,17 @@ def _process_tasks(
     tasks: list[TaskSpec],
     dry_run: bool,
     strict: bool,
+    dedupe: bool,
     verbose: bool,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
     used_slugs: set[str] = set()
+    seen_task_keys: set[str] = set()
     for index, task in enumerate(tasks, start=1):
+        if dedupe and _is_duplicate_task(task, seen_task_keys):
+            skipped_tasks.append(SkippedTask(task.name, "重复任务：任务名和描述已出现过"))
+            continue
         try:
             output = _process_one_task(task, index, dry_run, strict, used_slugs, verbose)
             outputs.append(output)
@@ -339,6 +345,18 @@ def _process_tasks(
             skipped_tasks.append(SkippedTask(task.name, str(error)))
             print(f"跳过任务 {task.name}：{error}", file=sys.stderr)
     return outputs, skipped_tasks
+
+
+def _is_duplicate_task(task: TaskSpec, seen_task_keys: set[str]) -> bool:
+    task_key = _dedupe_key(task)
+    if task_key in seen_task_keys:
+        return True
+    seen_task_keys.add(task_key)
+    return False
+
+
+def _dedupe_key(task: TaskSpec) -> str:
+    return _normalize_description(f"{task.name}\n{task.description}")
 
 
 def _process_one_task(
