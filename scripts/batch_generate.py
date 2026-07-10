@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     start_time = time.perf_counter()
     try:
-        tasks = _load_tasks(_input_path_from_args(args))
+        tasks = _load_tasks_from_input(_input_value_from_args(args), args.stdin_format)
         tasks = _filter_tasks(tasks, args.filter)
         tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
@@ -139,6 +139,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
     parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
     parser.add_argument("--input", help="输入文件路径，支持 .json、.jsonl、.csv、.yaml、.yml、.md 或 .markdown。")
+    parser.add_argument("--stdin-format", choices=("json", "jsonl"), default="jsonl", help="当输入为 - 时使用的 stdin 格式。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
@@ -158,11 +159,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 
-def _input_path_from_args(args: argparse.Namespace) -> Path:
+def _input_value_from_args(args: argparse.Namespace) -> str:
     input_value = args.input or args.input_path
     if not input_value:
         raise ValueError("必须提供 --input 或位置输入文件路径")
-    return Path(input_value)
+    return input_value
+
+
+def _load_tasks_from_input(input_value: str, stdin_format: str) -> list[TaskSpec]:
+    if input_value == "-":
+        return _load_stdin_tasks(sys.stdin.read(), stdin_format)
+    return _load_tasks(Path(input_value))
+
+
+def _load_stdin_tasks(text: str, stdin_format: str) -> list[TaskSpec]:
+    if stdin_format == "json":
+        return _tasks_from_json_data(json.loads(text))
+    if stdin_format == "jsonl":
+        return _load_jsonl_lines(text.splitlines())
+    raise ValueError(f"不支持的 stdin 格式：{stdin_format}")
 
 
 def _filter_tasks(tasks: list[TaskSpec], pattern: str | None) -> list[TaskSpec]:
@@ -226,7 +241,10 @@ def _load_tasks(input_path: Path) -> list[TaskSpec]:
 
 
 def _load_json_tasks(input_path: Path) -> list[TaskSpec]:
-    data = json.loads(input_path.read_text(encoding="utf-8"))
+    return _tasks_from_json_data(json.loads(input_path.read_text(encoding="utf-8")))
+
+
+def _tasks_from_json_data(data: Any) -> list[TaskSpec]:
     if not isinstance(data, list):
         raise ValueError("JSON 顶层必须是任务数组")
     tasks: list[TaskSpec] = []
@@ -246,8 +264,12 @@ def _task_from_json_item(item: dict[str, Any], index: int) -> TaskSpec:
 
 
 def _load_jsonl_tasks(input_path: Path) -> list[TaskSpec]:
+    return _load_jsonl_lines(input_path.read_text(encoding="utf-8").splitlines())
+
+
+def _load_jsonl_lines(lines: list[str]) -> list[TaskSpec]:
     tasks: list[TaskSpec] = []
-    for line_number, line in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not stripped:
             continue
