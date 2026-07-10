@@ -448,6 +448,38 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（系统 Python 缓存权限限制后使用已授权提权重跑通过）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py /tmp/batch_merge_round13_tasks.json --merge-supplements /tmp/batch_merge_round13_supplements.json --output-file /tmp/batch_merge_round13_merged.json --report-json /tmp/batch_merge_round13_report.json`、合并结果继续 `--lint-fields` 通过、`--merge-supplements --check` 对缺失要素和未知任务名失败退出码断言、CSV 补充回答合并断言、`python3 scripts/batch_generate.py --help | grep -n "merge-supplements"`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
+
+## 第 14 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 14 轮要求重新通读全部 7 个范围内文件及前 13 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮聚焦批量生成后的最终 `/goal` 文本交付门禁。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量生成输出自检门禁 | 用户执行批量生成到 stdout、单文件或目录后，可能因为默认填充或手工补充质量不足而得到结构完整但语义空泛的最终 `/goal` 文本；当前需要再用单任务或目录 lint 命令二次检查，且 `--output-file` 拼接多个任务时不适合逐文件 lint。 | 在 `scripts/batch_generate.py` 新增 `--lint-output`，在真实生成 `/goal` 后、写出交付物前对每个任务的最终文本复用 `lint_goal_text`，输出任务级通过/失败、语义得分和问题摘要，并把结果写入 `--report-json`；任一输出不合格时失败退出，避免低质量批量指令进入交付。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量生成输出自检门禁 | `scripts/generate_goal.py --lint-goal-file` | 单文件 lint 只能检查一个已有 `/goal` 文本；新功能在批量生成流程内部逐任务检查内存中的最终输出，可覆盖 stdout、单文件拼接和目录输出三种交付方式。 | 通过 |
+| 批量生成输出自检门禁 | `scripts/generate_goal.py --lint-goal-dir` | 目录 lint 只能扫描已落盘目录直属 `.txt` 文件；新功能无需先写出文件，并能处理 `--output-file` 拼接结果和默认 stdout 结果，拦截时机更早。 | 通过 |
+| 批量生成输出自检门禁 | 批量 `--lint-fields` | `--lint-fields` 检查生成前字段清单；新功能检查渲染后的最终 `/goal` 文本，能发现默认填充、渲染拼接或最终输出阶段的问题。 | 通过 |
+| 批量生成输出自检门禁 | `--check` / `--strict` | `--check` 只要求任务缺失字段时失败，不会审计最终指令语义质量；新功能关注最终交付物是否可直接执行。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量生成输出自检门禁 | 团队批量生成多个 `/goal` 指令后，希望在交付给执行者前确认每个最终文本结构完整且 6 要素不空泛。 | 先生成文件，再手工拆分或逐个运行 `--lint-goal-file`/`--lint-goal-dir`；对 `--output-file` 拼接结果需要额外脚本拆分。 | 一条命令完成生成和最终文本门禁，失败时直接定位到任务名、得分和问题，可阻止低质量指令落盘或进入 CI 产物。 | 不是单独 lint 命令的包装，而是把最终交付质量检查嵌入批量生成主流程，覆盖原有 lint 命令不方便处理的批量拼接输出。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -456,7 +488,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 13 轮，准备进入第 14 轮；累计修复 2 个问题，新增 13 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 13 轮，第 14 轮审查清单已创建且待实现能力增强；累计修复 2 个问题，新增 13 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
