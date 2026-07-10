@@ -15,11 +15,11 @@ description: Codex CLI Goal 指令生成器。用户描述编码任务需求，S
 
 1. **接收输入**：读取用户的一句话需求或详细需求，识别任务类型，例如代码质量优化、重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成。
 2. **判断单任务或批量任务**：如果用户一次提供多个编码任务需求，或提供 JSON/CSV 任务文件路径，调用 `scripts/batch_generate.py` 批量分析和生成；单个任务继续使用 `scripts/generate_goal.py`。
-3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；如果需要判断任务类型、复杂度和推荐模板，调用 `scripts/generate_goal.py --profile "用户任务描述"`；如果任务描述可能包含 token、密钥、邮箱或 URL，先调用 `scripts/generate_goal.py --redaction-check "用户任务描述"` 做脱敏检查；如果已有 6 要素字段 JSON，调用 `scripts/generate_goal.py --validate-fields-json <文件>` 在 `--generate --from-json` 前检查字段完整性、未知字段和可渲染性；如果用户不理解缺失项或需要更可操作的补全优先级，调用 `scripts/generate_goal.py --explain-missing "用户任务描述"`；如果用户已明确任务类型，可用 `--list-templates` 和 `--template <id>` 直接取内置 6 要素模板；需要校验已有 `/goal` 文件时调用 `--validate-goal-file <文件>`；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
+3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；如果需要判断任务类型、复杂度和推荐模板，调用 `scripts/generate_goal.py --profile "用户任务描述"`；如果用户只给出本地文件或目录、但没有说明范围和验证命令，调用 `scripts/generate_goal.py --inspect-path <路径> --path-task "用户目标"` 扫描代码上下文并获得边界/验证建议；如果任务描述可能包含 token、密钥、邮箱或 URL，先调用 `scripts/generate_goal.py --redaction-check "用户任务描述"` 做脱敏检查；如果已有 6 要素字段 JSON，调用 `scripts/generate_goal.py --validate-fields-json <文件>` 在 `--generate --from-json` 前检查字段完整性、未知字段和可渲染性；如果用户不理解缺失项或需要更可操作的补全优先级，调用 `scripts/generate_goal.py --explain-missing "用户任务描述"`；如果用户已明确任务类型，可用 `--list-templates` 和 `--template <id>` 直接取内置 6 要素模板；需要校验已有 `/goal` 文件时调用 `--validate-goal-file <文件>`；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
 4. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
 5. **一次性追问**：如果存在缺失或含糊要素，一次性列出全部缺失项并给出示例，不要逐项来回追问；需要直接生成可发送文案时可调用 `scripts/generate_goal.py --questions "用户任务描述"`。批量任务应按任务名称汇总缺失项。
 6. **整合用户补充**：用户回答后，把原始需求和补充信息合并为 6 个明确字段；如果仍缺关键技术决策，不要代替用户决定，继续一次性追问剩余关键缺口。
-7. **生成指令**：单任务调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或用 `--from-json <文件>` 从 JSON 读取 6 要素；对人工或自动化编辑过的字段 JSON，先用 `--validate-fields-json <文件>` 做质量门禁；只有一句话需求且用户接受默认验证/约束时，可用 `scripts/generate_goal.py --generate "描述" --branch <分支名>` 生成草案并提醒用户复核默认填充项；也可参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令；已有指令可用 `--validate-goal-file <文件>` 复核结构；批量任务调用 `scripts/batch_generate.py --input <JSON或CSV文件>`，可按需使用 `--list-tasks` 预览任务、`--check` 校验清单、`--defaults-json` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 复用团队默认值、`--filter`/`--limit` 控制处理范围、`--sort-by` 稳定输出顺序、`--dedupe` 去重、`--summary-only` 摘要输出、`--output-dir`、`--output-file`、`--strict`/`--fail-on-skipped` 质量门禁、`--report-json` 结构化报告。
+7. **生成指令**：单任务调用 `scripts/generate_goal.py --generate` 并传入 6 个字段，或用 `--from-json <文件>` 从 JSON 读取 6 要素；对人工或自动化编辑过的字段 JSON，先用 `--validate-fields-json <文件>` 做质量门禁；如果 6 要素还缺少真实代码边界，可先用 `--inspect-path` 的 `suggested_fields` 作为草稿来源；只有一句话需求且用户接受默认验证/约束时，可用 `scripts/generate_goal.py --generate "描述" --branch <分支名>` 生成草案并提醒用户复核默认填充项；也可参考 `assets/goal_template.txt` 手工生成 5 段式 `/goal` 指令；已有指令可用 `--validate-goal-file <文件>` 复核结构；批量任务调用 `scripts/batch_generate.py --input <JSON或CSV文件>`，可按需使用 `--list-tasks` 预览任务、`--check` 校验清单、`--defaults-json` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 复用团队默认值、`--filter`/`--limit` 控制处理范围、`--sort-by` 稳定输出顺序、`--dedupe` 去重、`--summary-only` 摘要输出、`--output-dir`、`--output-file`、`--strict`/`--fail-on-skipped` 质量门禁、`--report-json` 结构化报告。
 8. **输出结果**：先用 1-2 句话确认已生成什么指令、强调哪些关键约束；再输出带分隔线的纯文本 `/goal` 指令，不能用 Markdown 代码块包裹；需要落盘时可为单任务脚本追加 `--output-file <path>`。批量输出时每个任务之间保留任务名称和空行分隔。
 
 ## 3. 6 要素定义和检查逻辑
@@ -129,7 +129,7 @@ Blocked Stop Condition 是何时允许跳过、何时必须停下问人。例如
 
 ## 9. 适用和不适用场景
 
-适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
+适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、从现有文件/目录反向整理 `/goal` 边界与验证线索、批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
 
 不适用场景：非编码任务、主要依赖人工判断的设计决策、一次性小改动、没有明确验证面的探索性讨论。
 

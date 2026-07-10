@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,6 +222,60 @@ RISK_KEYWORD_RULES: tuple[tuple[str, int, str], ...] = (
     ("并发", 12, "涉及并发场景，验证面通常更复杂"),
     ("批量", 10, "涉及批量处理，需要明确跳过和审计规则"),
 )
+INSPECT_SKIP_DIRS: tuple[str, ...] = (
+    ".git",
+    ".hg",
+    ".svn",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    "vendor",
+)
+INSPECT_LANGUAGE_BY_SUFFIX: dict[str, str] = {
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".kts": "Kotlin",
+    ".swift": "Swift",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".cs": "C#",
+    ".c": "C/C++",
+    ".cc": "C/C++",
+    ".cpp": "C/C++",
+    ".h": "C/C++",
+    ".hpp": "C/C++",
+    ".md": "Markdown",
+    ".rst": "reStructuredText",
+    ".json": "JSON",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".toml": "TOML",
+    ".sh": "Shell",
+}
+INSPECT_TEST_NAME_PATTERNS: tuple[str, ...] = (
+    "test_",
+    "_test.",
+    ".test.",
+    ".spec.",
+    "tests/",
+    "__tests__/",
+    "spec/",
+)
+INSPECT_MAX_FILES = 120
+INSPECT_SAMPLE_LIMIT = 20
+INSPECT_VERIFICATION_SAMPLE_LIMIT = 12
 DEFAULT_PATH_HINT = "对应文件"
 MAX_INTERACTIVE_ROUNDS = 3
 INTERACTIVE_DEFAULTS: dict[str, str] = {
@@ -395,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.redaction_check:
             _emit_output(json.dumps(check_redaction(args.redaction_check), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.inspect_path:
+            _emit_output(
+                json.dumps(inspect_path_context(args.inspect_path, args.path_task or ""), ensure_ascii=False, indent=2),
+                args.output_file,
+            )
+            return 0
         if args.explain_missing:
             _emit_output(
                 json.dumps(explain_missing_elements(args.explain_missing), ensure_ascii=False, indent=2),
@@ -433,6 +495,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
+    parser.add_argument("--inspect-path", help="扫描本地文件或目录，输出代码上下文、边界和验证命令建议 JSON。")
+    parser.add_argument("--path-task", help="配合 --inspect-path 提供用户目标描述，用于生成更贴近场景的建议字段。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
@@ -738,6 +802,212 @@ def check_redaction(description: str) -> dict[str, object]:
         "redacted_preview": _normalize_text(_redact_sensitive_text(description, findings))[:TEXT_PREVIEW_LENGTH],
         "recommended_action": _redaction_recommended_action(risk_level, findings),
     }
+
+
+def inspect_path_context(path_value: str, task_description: str = "") -> dict[str, object]:
+    """扫描本地路径并输出生成 /goal 前需要的代码上下文线索。"""
+    if not path_value.strip():
+        raise ValueError("--inspect-path 不能为空，请提供文件或目录路径")
+    root = Path(path_value).expanduser()
+    if not root.exists():
+        raise ValueError(f"--inspect-path 不存在：{path_value}")
+
+    files, truncated = _collect_inspection_files(root)
+    language_counts = _inspection_language_counts(files)
+    test_files = [file_path for file_path in files if _is_inspection_test_file(root, file_path)]
+    verification_hints = _inspection_verification_hints(root, files, language_counts)
+    risk_flags = _inspection_risk_flags(root, files, language_counts, test_files, verification_hints, truncated)
+    suggested_fields = _inspection_suggested_fields(
+        root,
+        files,
+        language_counts,
+        test_files,
+        verification_hints,
+        task_description,
+    )
+    return {
+        "path": _display_path(root),
+        "kind": "file" if root.is_file() else "directory",
+        "truncated": truncated,
+        "file_count": len(files),
+        "language_counts": language_counts,
+        "sample_files": [_display_path(file_path) for file_path in files[:INSPECT_SAMPLE_LIMIT]],
+        "test_file_count": len(test_files),
+        "test_files": [_display_path(file_path) for file_path in test_files[:INSPECT_SAMPLE_LIMIT]],
+        "verification_hints": verification_hints,
+        "risk_flags": risk_flags,
+        "suggested_fields": suggested_fields,
+        "next_steps": _inspection_next_steps(task_description),
+    }
+
+
+def _collect_inspection_files(root: Path) -> tuple[list[Path], bool]:
+    if root.is_file():
+        return [root], False
+    files: list[Path] = []
+    truncated = False
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in INSPECT_SKIP_DIRS]
+        for filename in sorted(filenames):
+            file_path = Path(current_root) / filename
+            if not file_path.is_file():
+                continue
+            files.append(file_path)
+            if len(files) >= INSPECT_MAX_FILES:
+                return files, True
+    return files, truncated
+
+
+def _inspection_language_counts(files: list[Path]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for file_path in files:
+        language = INSPECT_LANGUAGE_BY_SUFFIX.get(file_path.suffix.lower(), "Other")
+        counts[language] = counts.get(language, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _is_inspection_test_file(root: Path, file_path: Path) -> bool:
+    normalized = _normalized_inspection_path(root, file_path).lower()
+    return any(pattern in normalized for pattern in INSPECT_TEST_NAME_PATTERNS)
+
+
+def _inspection_verification_hints(
+    root: Path,
+    files: list[Path],
+    language_counts: dict[str, int],
+) -> list[str]:
+    hints: list[str] = []
+    python_files = [file_path for file_path in files if file_path.suffix.lower() == ".py"]
+    if python_files:
+        hints.append(f"python3 -m py_compile {_join_shell_paths(python_files[:INSPECT_VERIFICATION_SAMPLE_LIMIT])}")
+        if _has_named_file_near(root, "pyproject.toml") or _has_named_file_near(root, "pytest.ini"):
+            hints.append("python3 -m pytest")
+    if "JavaScript" in language_counts or "TypeScript" in language_counts:
+        hints.append("npm test（如项目 package.json 定义了 test 脚本）")
+    if "Go" in language_counts:
+        hints.append("go test ./...")
+    if "Rust" in language_counts:
+        hints.append("cargo test")
+    if "Java" in language_counts or "Kotlin" in language_counts:
+        hints.append("运行项目现有 Gradle/Maven 测试命令")
+    if not hints and files:
+        hints.append("运行项目现有测试、构建或语法检查命令；若没有自动化验证，至少记录人工检查证据")
+    return hints
+
+
+def _join_shell_paths(paths: list[Path]) -> str:
+    return " ".join(shlex.quote(_display_path(path)) for path in paths)
+
+
+def _has_named_file_near(root: Path, filename: str) -> bool:
+    candidates = [root] if root.is_dir() else [root.parent]
+    candidates.extend(candidates[0].parents)
+    return any((candidate / filename).exists() for candidate in candidates[:4])
+
+
+def _inspection_risk_flags(
+    root: Path,
+    files: list[Path],
+    language_counts: dict[str, int],
+    test_files: list[Path],
+    verification_hints: list[str],
+    truncated: bool,
+) -> list[str]:
+    flags: list[str] = []
+    if truncated:
+        flags.append(f"扫描达到 {INSPECT_MAX_FILES} 个文件上限，建议在 /goal 中收窄边界或分批处理。")
+    if not files:
+        flags.append("目标路径下没有发现可扫描文件，需确认边界是否正确。")
+    if len(language_counts) >= 3:
+        flags.append("扫描范围包含多种语言，建议按语言或模块拆分迭代。")
+    if files and not test_files:
+        flags.append("扫描范围内未发现明显测试文件，需在 /goal 中说明替代验证方式。")
+    if not verification_hints:
+        flags.append("未能推断验证命令，生成 /goal 前应让用户补充项目验证方式。")
+    if _path_has_generated_hint(root):
+        flags.append("路径名包含生成物或构建产物线索，需确认是否允许修改生成文件。")
+    return flags or ["未发现明显路径级风险；仍需结合用户目标确认最终 6 要素。"]
+
+
+def _path_has_generated_hint(root: Path) -> bool:
+    lowered_parts = {part.lower() for part in root.parts}
+    return bool(lowered_parts.intersection({"dist", "build", "generated", "target"}))
+
+
+def _inspection_suggested_fields(
+    root: Path,
+    files: list[Path],
+    language_counts: dict[str, int],
+    test_files: list[Path],
+    verification_hints: list[str],
+    task_description: str,
+) -> dict[str, str]:
+    language_summary = _language_summary(language_counts)
+    outcome = _inspection_outcome(root, task_description)
+    boundaries = _inspection_boundaries(root, files, language_summary)
+    verification = "；".join(verification_hints) or "确认路径包含可处理文件后，补充项目现有验证命令或人工检查证据。"
+    constraints = "不修改扫描范围外文件；不引入未经确认的新依赖；保持现有公开 API、数据格式和用户可见行为兼容。"
+    if test_files:
+        constraints += " 不删除、跳过或弱化现有测试。"
+    iteration = "按文件、模块或语言分批处理；每个独立改动运行相关验证后单独 commit，预期 3-8 个 commit。"
+    blocked = "扫描结果无法证明业务预期、必须改变公共行为、验证命令缺失或范围需要扩大时停下向用户确认。"
+    return {
+        "outcome": outcome,
+        "verification": verification,
+        "constraints": constraints,
+        "boundaries": boundaries,
+        "iteration": iteration,
+        "blocked": blocked,
+    }
+
+
+def _inspection_outcome(root: Path, task_description: str) -> str:
+    normalized_task = _normalize_text(task_description)
+    if normalized_task:
+        return f"围绕 `{_display_path(root)}` 完成用户描述的编码任务：{normalized_task}"
+    return f"基于 `{_display_path(root)}` 的现有代码上下文补齐待执行编码任务；生成最终 /goal 前需进一步明确用户目标结果。"
+
+
+def _inspection_boundaries(root: Path, files: list[Path], language_summary: str) -> str:
+    if root.is_file():
+        return f"仅处理文件 `{_display_path(root)}`；范围外问题只记录，不纳入本次改动。"
+    sample_paths = "、".join(_display_path(file_path) for file_path in files[:5]) or "无样例文件"
+    return (
+        f"仅处理 `{_display_path(root)}` 下已扫描的 {len(files)} 个文件"
+        f"（主要类型：{language_summary}；样例：{sample_paths}）；"
+        "排除 .git、缓存目录、依赖目录、构建产物和生成文件，范围外问题只记录。"
+    )
+
+
+def _language_summary(language_counts: dict[str, int]) -> str:
+    if not language_counts:
+        return "未识别"
+    return "、".join(f"{language} {count} 个" for language, count in list(language_counts.items())[:5])
+
+
+def _inspection_next_steps(task_description: str) -> list[str]:
+    steps = [
+        "确认 suggested_fields.outcome 是否符合真实用户目标，必要时补充数量、模块或验收标准。",
+        "把 suggested_fields 保存为 JSON 后，可用 --validate-fields-json 检查，再用 --generate --from-json 生成最终 /goal。",
+    ]
+    if not task_description.strip():
+        steps.insert(0, "追加 --path-task '<用户目标>' 重新扫描，可得到更贴近场景的 outcome 建议。")
+    return steps
+
+
+def _normalized_inspection_path(root: Path, file_path: Path) -> str:
+    try:
+        relative = file_path.relative_to(root if root.is_dir() else root.parent)
+    except ValueError:
+        relative = file_path
+    return str(relative).replace("\\", "/")
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
 
 
 def _sensitive_findings(text: str) -> list[dict[str, object]]:

@@ -56,6 +56,16 @@ python3 scripts/generate_goal.py --profile "修复登录 API 在空 token 场景
 python3 scripts/generate_goal.py --redaction-check "修复登录问题，token=abcdef1234567890，联系 owner@example.com"
 ```
 
+### 扫描代码路径上下文
+
+当用户只指出“改这个目录/文件”，但没有整理边界、语言栈、测试文件和验证命令时，可用 `--inspect-path` 扫描本地路径并输出代码事实摘要、风险提示和可用于 6 要素草稿的 `suggested_fields`：
+
+```bash
+python3 scripts/generate_goal.py --inspect-path scripts --path-task "优化 goal 生成器的输入分析能力"
+```
+
+输出包含 `language_counts`、`sample_files`、`test_files`、`verification_hints`、`risk_flags` 和 `suggested_fields`。建议先复核 `suggested_fields.outcome` 是否符合真实目标，再保存为 JSON 并配合 `--validate-fields-json` 与 `--generate --from-json` 生成最终 `/goal`。
+
 ### 解释缺失要素
 
 使用 `--explain-missing` 在 `--analyze` 的基础上进一步输出“为什么缺、优先补什么、推荐怎么填”和可直接发送给用户的追问文案：
@@ -255,6 +265,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量任务指令生成（JSON/CSV）
 - 任务类型画像与 6 要素模板推荐
 - 缺失 6 要素的原因解释、优先级和补全建议
+- 从本地文件或目录反向整理 `/goal` 边界、验证命令和风险线索
 - 单任务敏感信息检查和脱敏预览
 - 单任务 6 要素字段 JSON 质量校验
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
