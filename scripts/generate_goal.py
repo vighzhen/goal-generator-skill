@@ -195,6 +195,15 @@ DEFAULT_PROFILE_TEMPLATE: dict[str, str] = {
     "iteration": "规定每步粒度、验证动作、commit 节奏和预期数量。",
     "blocked": "定义允许跳过、必须停下问人和记录证据的条件。",
 }
+RISK_KEYWORD_RULES: tuple[tuple[str, int, str], ...] = (
+    ("数据库", 20, "涉及数据库或持久化变更，需要明确迁移与回滚策略"),
+    ("迁移", 18, "涉及迁移任务，需要更严格的边界和兼容验证"),
+    ("全量", 16, "涉及全量范围，容易遗漏候选项或扩大改动"),
+    ("公共 api", 15, "涉及公共 API，需确认兼容性和调用方影响"),
+    ("错误码", 12, "涉及错误码或响应契约，需避免破坏外部依赖"),
+    ("并发", 12, "涉及并发场景，验证面通常更复杂"),
+    ("批量", 10, "涉及批量处理，需要明确跳过和审计规则"),
+)
 DEFAULT_PATH_HINT = "对应文件"
 MAX_INTERACTIVE_ROUNDS = 3
 INTERACTIVE_DEFAULTS: dict[str, str] = {
@@ -390,9 +399,14 @@ def build_task_profile(description: str) -> dict[str, object]:
     analysis = analyze_description(normalized_text)
     profile_id, label, template = _infer_profile(normalized_text)
     level, reasons = _estimate_complexity(normalized_text, analysis["missing"])
+    risk = _risk_assessment(normalized_text, analysis["missing"], level)
     return {
         "task_type": {"id": profile_id, "label": label},
         "complexity": {"level": level, "reasons": reasons},
+        "risk": risk,
+        "risk_score": risk["score"],
+        "risk_level": risk["level"],
+        "risk_factors": risk["factors"],
         "ask_strategy": _ask_strategy(level, analysis["missing"]),
         "missing": analysis["missing"],
         "present": analysis["present"],
@@ -442,6 +456,54 @@ def _ask_strategy(level: str, missing: list[str]) -> str:
     if level == "medium":
         return f"一次性追问缺失项，并要求用户给出路径、命令或数量：{labels}。"
     return f"按 6 要素分组追问，优先确认 Outcome、Boundaries 和 Verification：{labels}。"
+
+
+def _risk_assessment(text: str, missing: list[str], complexity_level: str) -> dict[str, object]:
+    factors: list[str] = []
+    score = _missing_risk_score(missing, factors) + _complexity_risk_score(complexity_level, factors)
+    score += _keyword_risk_score(text, factors)
+    bounded_score = min(score, 100)
+    return {
+        "score": bounded_score,
+        "level": _risk_level(bounded_score),
+        "factors": factors or ["未发现明显高风险信号"],
+    }
+
+
+def _missing_risk_score(missing: list[str], factors: list[str]) -> int:
+    if not missing:
+        return 0
+    labels = "、".join(ELEMENT_LABELS[key] for key in missing)
+    factors.append(f"缺失 {len(missing)} 个必要要素：{labels}")
+    return min(len(missing) * 8, 40)
+
+
+def _complexity_risk_score(level: str, factors: list[str]) -> int:
+    if level == "high":
+        factors.append("复杂度为 high，需要更完整的任务边界和验证面")
+        return 25
+    if level == "medium":
+        factors.append("复杂度为 medium，建议补充路径、命令或数量")
+        return 12
+    return 0
+
+
+def _keyword_risk_score(text: str, factors: list[str]) -> int:
+    lowered_text = text.lower()
+    score = 0
+    for keyword, value, reason in RISK_KEYWORD_RULES:
+        if keyword in lowered_text:
+            score += value
+            factors.append(reason)
+    return score
+
+
+def _risk_level(score: int) -> str:
+    if score >= 70:
+        return "high"
+    if score >= 35:
+        return "medium"
+    return "low"
 
 
 def _goal_from_args(args: argparse.Namespace) -> _GoalFields:
