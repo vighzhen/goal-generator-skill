@@ -949,7 +949,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量关键要素显式来源门禁 | `--strict` 只关心 6 要素是否能被推断/填充，`--max-defaulted-fields` 只限制默认填充数量；但团队常要求 Verification、Boundaries 等关键要素必须由任务清单显式给出，不能靠描述启发式推断或默认值兜底。当前只能人工检查 `field_sources` 或写外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--require-explicit-fields <字段列表>`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，任务只有在 `fields` 或 description 中显式标签提供这些字段时才通过，否则跳过并返回失败退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+| 1 | 批量关键要素显式来源门禁 | `--strict` 只关心 6 要素是否能被推断/填充，`--max-defaulted-fields` 只限制默认填充数量；但团队常要求 Verification、Boundaries 等关键要素必须由任务清单显式给出，不能靠描述启发式推断或默认值兜底。当前只能人工检查 `field_sources` 或写外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--require-explicit-fields <字段列表>`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，任务只有在 `fields` 或 description 中显式标签提供这些字段时才通过，否则跳过并返回失败退出码。同步更新 README 与 SKILL。 | 已实现 | 7791bee |
 
 #### 去重审查
 
@@ -965,6 +965,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量关键要素显式来源门禁 | 团队要求批量任务中 verification、boundaries、blocked 等高风险字段必须由需求方显式填写，不能由工具猜测。 | 生成前人工审查每个任务的 fields/description 标签，或跑报告后写脚本检查字段来源。 | 一条命令指定必须显式给出的关键要素，超限任务直接跳过并失败退出，降低批量分派风险。 | 不是质量分数或默认数量限制，而是对关键字段“输入来源”建立可执行门禁。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-explicit-fields"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、显式字段任务 `--dry-run --require-explicit-fields "Verification Surface,边界"` 通过并断言成功 1/跳过 0、示例清单 `--dry-run --require-explicit-fields verification,boundaries` 返回失败退出码并断言跳过任务包含 `登录接口Bug修复` 与“缺少显式要素”、真实生成与 `--lint-output` 组合均返回失败退出码并保留跳过原因、`--profile-tasks` 无效组合与未知字段参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -973,7 +977,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 28 轮审查清单已建立，正在实现批量关键要素显式来源门禁；累计修复 4 个已完成问题，新增 27 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 28 轮已完成，准备进入第 29 轮；累计修复 4 个已完成问题，新增 28 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -1003,4 +1007,5 @@
 - 第 25 轮：单任务语义质量最低分门禁（d006d60）
 - 第 26 轮：批量语义质量最低分门禁（8747b26）
 - 第 27 轮：批量默认填充数量门禁（5a30720）
-剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；关键字段当前可由描述启发式或默认值补齐，本轮显式来源门禁完成前仍需人工检查来源；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
+- 第 28 轮：批量关键要素显式来源门禁（7791bee）
+剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；`--require-explicit-fields` 只把任务 `fields` 和 `description` 中的显式字段标签视为显式来源，不把自由散文中的启发式命中算作显式，团队可能需要在清单中统一标注关键字段；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
