@@ -1071,6 +1071,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-existing-task-path"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、存在路径清单 `--dry-run --require-existing-task-path` 通过并断言成功 1/跳过 0、含不存在路径清单返回失败退出码并断言“任务路径不存在”、缺失路径清单返回失败退出码并断言“缺少任务路径”、`--check` 与 `--lint-output` 组合均返回失败退出码并保留路径错误原因、`--inspect-paths` 无效组合参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 32 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 32 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3131 行 sha256 089069f61e0ad9d0、SKILL.md 144 行 sha256 40bd69a0ebb18d5c、README.md 494 行 sha256 eb6d3bcb918375f2、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 31 轮路径存在门禁、路径画像/回填能力与批量生成前准备流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务路径根目录白名单门禁 | 现有 `--require-task-path` 和 `--require-existing-task-path` 只能保证任务有路径且路径存在，但无法限制任务路径必须落在团队允许的根目录中；批量清单可能混入范围外目录、仓库外路径或误填到无关模块。当前只能人工审查路径或写外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--allowed-path-roots <根目录列表>`，用于真实生成、dry-run、check 和 lint-output 前的准备流程；任务必须提供路径且解析后位于任一允许根目录内，否则跳过并返回失败退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务路径根目录白名单门禁 | `--require-task-path` | 既有门禁只要求路径字段存在；新功能要求路径位于允许根目录内，防止范围外任务进入生成。 | 通过 |
+| 批量任务路径根目录白名单门禁 | `--require-existing-task-path` | 既有门禁只检查路径存在；新功能检查路径归属范围，允许团队表达“只能生成 scripts/ 或 src/ 内任务”的策略。 | 通过 |
+| 批量任务路径根目录白名单门禁 | `--inspect-paths` / `--enrich-from-paths` | 路径画像和回填消费已有路径产生上下文或建议字段；新功能是生成前范围准入门禁，不扫描内容也不回填字段。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务路径根目录白名单门禁 | 团队批量生成前只允许任务指向某些模块或目录，例如本轮只允许 `scripts/`、`src/`，避免范围外路径进入执行。 | 人工逐条检查 path 是否在允许目录下，或外部写脚本做路径前缀校验；生成命令本身无法阻断范围外路径。 | 一条命令完成路径根目录白名单校验、跳过越界任务并失败退出，减少批量分派的范围漂移风险。 | 这是路径范围策略门禁，不是路径存在性检查、路径扫描报告或 6 要素质量门禁。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1079,7 +1109,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 31 轮已完成，准备进入第 32 轮；累计修复 4 个已完成问题，新增 31 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 32 轮审查清单已建立，正在实现批量任务路径根目录白名单门禁；累计修复 4 个已完成问题，新增 31 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
