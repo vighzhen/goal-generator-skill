@@ -455,6 +455,7 @@ def build_capabilities() -> dict[str, object]:
                 "--output-file",
                 "--report-json",
                 "--report-md",
+                "--index-md",
                 "--include-profile",
                 "--verbose",
             ],

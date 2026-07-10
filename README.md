@@ -257,11 +257,14 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 每个任务生成一个独立 .txt 文件，输出目录不存在时会自动创建
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/
 
+# 为批量输出产物生成 Markdown 导航索引，方便在 PR 或文档中快速打开对应文件
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/ --index-md output/index.md
+
 # 所有任务写入同一个文件
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。传入 `--input -` 或位置参数 `-` 时，脚本会从标准输入读取任务流，并用 `--stdin-format jsonl`（默认）或 `--stdin-format json` 指定格式。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值；如果没有传入该参数，脚本会读取 `GOAL_GENERATOR_DEFAULTS_JSON` 环境变量作为团队默认值文件。若传入 `--list-tasks`，脚本只输出当前筛选、排序和限制后的任务名称，便于预览处理范围；若传入 `--profile-summary`，脚本只输出任务名称、类型、风险和缺失要素摘要，便于命令行快速评审。若传入 `--check`，脚本会启用 `--dry-run --strict --summary-only --fail-on-skipped` 的校验组合，适合 CI 或交付前检查。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议，方便自动化集成；同时传入 `--include-profile` 时，每个成功任务会追加任务类型、复杂度、风险评分、风险因素、追问策略和推荐 6 要素模板。若传入 `--report-md <path>`，脚本会写出适合人工审阅的 Markdown 批量报告，包含成功任务和跳过任务表格。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--sort-by name`，脚本会按任务名排序，默认 `--sort-by input` 保持输入顺序。若传入 `--limit <N>`，脚本只处理筛选和排序后的前 N 个任务，适合首次试跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。传入 `--input -` 或位置参数 `-` 时，脚本会从标准输入读取任务流，并用 `--stdin-format jsonl`（默认）或 `--stdin-format json` 指定格式。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值；如果没有传入该参数，脚本会读取 `GOAL_GENERATOR_DEFAULTS_JSON` 环境变量作为团队默认值文件。若传入 `--list-tasks`，脚本只输出当前筛选、排序和限制后的任务名称，便于预览处理范围；若传入 `--profile-summary`，脚本只输出任务名称、类型、风险和缺失要素摘要，便于命令行快速评审。若传入 `--check`，脚本会启用 `--dry-run --strict --summary-only --fail-on-skipped` 的校验组合，适合 CI 或交付前检查。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议，方便自动化集成；同时传入 `--include-profile` 时，每个成功任务会追加任务类型、复杂度、风险评分、风险因素、追问策略和推荐 6 要素模板。若传入 `--report-md <path>`，脚本会写出适合人工审阅的 Markdown 批量报告，包含成功任务和跳过任务表格。若传入 `--index-md <path>`，脚本会为批量输出产物生成 Markdown 导航索引。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--sort-by name`，脚本会按任务名排序，默认 `--sort-by input` 保持输入顺序。若传入 `--limit <N>`，脚本只处理筛选和排序后的前 N 个任务，适合首次试跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
 
 ## 6 个必要要素
 
