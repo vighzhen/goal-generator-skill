@@ -43,14 +43,14 @@
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | scripts/generate_goal.py | 第 1 轮新增的 `--inspect-path` 使用 `os.walk` 时只过滤目录但未排序目录名，跨平台或文件系统顺序不同会导致 `sample_files`、验证命令样例和 JSON 输出顺序不稳定，不利于审计与回归比对。 | 待修复 | 待回填 |
+| 1 | P1 | scripts/generate_goal.py | 第 1 轮新增的 `--inspect-path` 使用 `os.walk` 时只过滤目录但未排序目录名，跨平台或文件系统顺序不同会导致 `sample_files`、验证命令样例和 JSON 输出顺序不稳定，不利于审计与回归比对。 | 已修复 | eb47807 |
 | - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 2 轮要求重新通读全部 7 个范围内文件及第 1 轮新增功能；除上述稳定性问题外，暂未发现新的 P0/P1。 | 无需修复 | - |
 
 #### 能力增强点（B）
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量任务依赖计划 | 团队批量任务常存在“先改基础模块，再补测试/文档/迁移”的依赖关系；当前批量脚本只能按输入/名称排序，无法表达依赖、发现缺失依赖或循环依赖，用户只能手工维护执行顺序。 | 在 `scripts/batch_generate.py` 新增可选 `depends_on`/`dependencies` 字段解析（JSON 数组或字符串，CSV 分隔字符串）和 `--plan-dependencies` 命令，输出按依赖分批的执行计划、未知依赖、重复任务名和循环依赖问题；支持 `--report-json`、`--filter`、`--limit`、`--dedupe` 与摘要输出。 | 待实现 | 待回填 |
+| 1 | 批量任务依赖计划 | 团队批量任务常存在“先改基础模块，再补测试/文档/迁移”的依赖关系；当前批量脚本只能按输入/名称排序，无法表达依赖、发现缺失依赖或循环依赖，用户只能手工维护执行顺序。 | 在 `scripts/batch_generate.py` 新增可选 `depends_on`/`dependencies` 字段解析（JSON 数组或字符串，CSV 分隔字符串）和 `--plan-dependencies` 命令，输出按依赖分批的执行计划、未知依赖、重复任务名和循环依赖问题；支持 `--report-json`、`--filter`、`--limit`、`--dedupe` 与摘要输出。 | 已实现 | 42b3f12 |
 
 #### 去重审查
 
@@ -68,7 +68,7 @@
 
 ### 本轮总结
 
-进行中：已完成第 2 轮审查清单，计划先修复 `--inspect-path` 输出顺序稳定性，再实现 1 个批量依赖分析能力。
+修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、有效/无效 `--plan-dependencies` 示例验证、完整 `--generate` 端到端验证。
 
 ## 用户纠正记录
 
@@ -78,8 +78,9 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 2 轮；累计修复 1 个问题，新增 1 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 2 轮；累计修复 2 个问题，新增 2 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
-剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令，生成最终 `/goal` 前仍需用户或执行者复核真实项目命令和业务目标。
+- 第 2 轮：批量任务依赖计划（42b3f12）
+剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令；批量依赖计划依赖用户显式填写准确任务名，不能从自然语言自动证明真实工程依赖。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标和任务关系。
