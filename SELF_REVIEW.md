@@ -29,7 +29,7 @@
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | scripts/batch_generate.py::_build_parser | 第 1 轮新增 Markdown 表格输入后，CLI help 仍写“支持 .json 或 .csv”，用户通过 --help 会误以为 .md 不受支持，文档与实际能力不一致。 | 待修复 | - |
+| 1 | P1 | scripts/batch_generate.py::_build_parser | 第 1 轮新增 Markdown 表格输入后，CLI help 仍写“支持 .json 或 .csv”，用户通过 --help 会误以为 .md 不受支持，文档与实际能力不一致。 | 已修复 | 待提交 |
 
 #### 能力增强点（B）
 

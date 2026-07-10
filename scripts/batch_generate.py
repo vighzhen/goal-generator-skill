@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
     parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
-    parser.add_argument("--input", help="输入文件路径，支持 .json 或 .csv。")
+    parser.add_argument("--input", help="输入文件路径，支持 .json、.csv、.md 或 .markdown。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
