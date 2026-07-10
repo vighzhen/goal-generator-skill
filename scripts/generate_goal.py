@@ -372,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.output_file,
             )
             return 0
+        if args.review_card:
+            _emit_output(format_review_card(args.review_card), args.output_file)
+            return 0
         if args.suggest_fields:
             _emit_output(json.dumps(suggest_goal_fields(args.suggest_fields), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -416,6 +419,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
     parser.add_argument("--compare", nargs=2, metavar=("DESCRIPTION_A", "DESCRIPTION_B"), help="对比两个任务描述的可执行度并给出补信息建议。")
+    parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
@@ -466,6 +470,7 @@ def build_capabilities() -> dict[str, object]:
                 "--profile",
                 "--score",
                 "--compare",
+                "--review-card",
                 "--suggest-fields",
                 "--explain-missing",
                 "--list-templates",
@@ -544,6 +549,11 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "对比两个任务描述",
                 "scenario": "同时拿到两个候选任务时，判断哪个更可直接生成 /goal、哪个更需要补信息。",
                 "command": "python3 scripts/generate_goal.py --compare '给项目加单元测试' '为 src/services/ 补齐 pytest 单元测试，运行 pytest tests/services -q'",
+            },
+            {
+                "name": "生成 Markdown 评审卡片",
+                "scenario": "需要把一个任务的评分、风险、缺失项和追问文案贴到 PR、Issue 或群聊。",
+                "command": "python3 scripts/generate_goal.py --review-card '给项目加单元测试'",
             },
             {
                 "name": "生成字段建议",
@@ -891,6 +901,80 @@ def compare_descriptions(description_a: str, description_b: str) -> dict[str, ob
         "missing_only_in_b": _missing_difference(score_b, score_a),
         "recommendation": _comparison_recommendation(comparison, score_a, score_b),
     }
+
+
+def format_review_card(description: str) -> str:
+    """生成便于人工评审和分享的单任务 Markdown 卡片。"""
+    if not description.strip():
+        raise ValueError("--review-card 不能为空，请提供任务描述")
+    score = score_description(description)
+    profile = build_task_profile(description)
+    suggestion = suggest_goal_fields(description)
+    explain = explain_missing_elements(description)
+    task_type = profile.get("task_type", {})
+    task_label = task_type.get("label", "未知") if isinstance(task_type, dict) else "未知"
+    lines = [
+        "# Goal Review Card",
+        "",
+        f"- 描述：{_markdown_inline(_normalize_text(description)[:TEXT_PREVIEW_LENGTH])}",
+        f"- 任务类型：{_markdown_inline(str(task_label))}",
+        f"- 可执行度：{score.get('readiness_score', 0)}/100（{score.get('readiness_level', 'unknown')}）",
+        f"- 风险：{profile.get('risk_level', 'unknown')}（{profile.get('risk_score', 0)}）",
+        f"- 下一步：{_markdown_inline(str(score.get('next_action', '')))}",
+        "",
+        "## 缺失要素",
+        "",
+    ]
+    lines.extend(_review_missing_lines(score))
+    lines.extend(["", "## 推荐 6 要素草稿", ""])
+    lines.extend(_review_fields_table(suggestion))
+    lines.extend(["", "## 可直接发送的追问", ""])
+    lines.append(_markdown_block(str(explain.get("next_prompt", ""))))
+    return "\n".join(lines)
+
+
+def _review_missing_lines(score: dict[str, object]) -> list[str]:
+    missing = score.get("missing", [])
+    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
+    if not missing_keys:
+        return ["- 无缺失要素；仍建议人工复核边界、验证命令和受阻条件。"]
+    return [f"- {ELEMENT_LABELS[key]}：{MISSING_REASON_TEMPLATES[key]}" for key in missing_keys]
+
+
+def _review_fields_table(suggestion: dict[str, object]) -> list[str]:
+    fields = suggestion.get("fields", {})
+    sources = suggestion.get("sources", {})
+    field_values = fields if isinstance(fields, dict) else {}
+    source_values = sources if isinstance(sources, dict) else {}
+    lines = [
+        "| 要素 | 来源 | 建议内容 |",
+        "| --- | --- | --- |",
+    ]
+    for key in ELEMENT_ORDER:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(ELEMENT_LABELS[key]),
+                    _markdown_cell(str(source_values.get(key, "unknown"))),
+                    _markdown_cell(str(field_values.get(key, ""))),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _markdown_inline(value: str) -> str:
+    return value.replace("\n", " ").strip()
+
+
+def _markdown_block(value: str) -> str:
+    return value.strip().replace("\n", "\n\n")
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", "<br>").strip()
 
 
 def _comparison_summary(label: str, description: str, score: dict[str, object]) -> dict[str, object]:
