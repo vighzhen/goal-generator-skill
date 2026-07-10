@@ -20,6 +20,7 @@ from generate_goal import (
     _GoalFields,
     _extract_labeled_fields,
     analyze_description,
+    build_task_profile,
     check_redaction,
     inspect_path_context,
     lint_goal_text,
@@ -124,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.lint_output and (
         args.merge_supplements
         or args.questions
+        or args.profile_tasks
         or args.redaction_check
         or args.lint_fields
         or args.inspect_paths
@@ -143,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.questions:
         return _run_batch_questions_mode(tasks, args, start_time)
+    if args.profile_tasks:
+        return _run_batch_profile_mode(tasks, args, start_time)
     if args.redaction_check:
         return _run_batch_redaction_check_mode(tasks, args, start_time)
     if args.lint_fields:
@@ -230,6 +234,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
     parser.add_argument("--redaction-check", action="store_true", help="批量检查任务名称、描述和字段值中的 token、邮箱、URL 等敏感信息。")
+    parser.add_argument("--profile-tasks", action="store_true", help="批量识别任务类型、复杂度、风险和 6 要素缺口。")
     parser.add_argument("--questions", action="store_true", help="按任务生成可直接发送的批量缺失要素追问文案。")
     parser.add_argument("--merge-supplements", help="读取按任务名组织的补充回答 JSON/CSV，合并回批量任务 fields 并输出新的任务 JSON。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
@@ -363,6 +368,217 @@ def _run_batch_questions_mode(tasks: list[TaskSpec], args: argparse.Namespace, s
     if fail_on_skipped and (question_report["needs_input_count"] or skipped_tasks):
         return 1
     return 0
+
+
+def _run_batch_profile_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--profile-tasks 不支持 --output-dir，请使用 --output-file 写入画像文本。", file=sys.stderr)
+        return 1
+    profile_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    profile_report = _build_batch_profile_report(profile_tasks)
+    profile_text = _format_batch_profile_report(profile_report)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(profile_text, Path(args.output_file))
+    elif not summary_only:
+        print(profile_text)
+    elapsed_seconds = time.perf_counter() - start_time
+    skipped_count = len(skipped_tasks) + int(profile_report["input_error_count"])
+    stats = BatchStats(int(profile_report["profiled_count"]), skipped_count, elapsed_seconds)
+    if args.report_json:
+        _write_batch_profile_report(profile_report, skipped_tasks, stats, Path(args.report_json))
+    print(_format_batch_profile_summary(profile_report, len(skipped_tasks), elapsed_seconds))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
+def _build_batch_profile_report(tasks: list[TaskSpec]) -> dict[str, object]:
+    task_reports = [_task_profile_report(task) for task in tasks]
+    profiled_reports = [report for report in task_reports if not report["input_error"]]
+    return {
+        "task_count": len(task_reports),
+        "profiled_count": len(profiled_reports),
+        "input_error_count": len(task_reports) - len(profiled_reports),
+        "high_risk_count": sum(1 for report in profiled_reports if report.get("risk_level") == "high"),
+        "task_type_counts": _batch_profile_task_type_counts(profiled_reports),
+        "complexity_counts": _batch_profile_value_counts(profiled_reports, "complexity_level"),
+        "risk_level_counts": _batch_profile_value_counts(profiled_reports, "risk_level"),
+        "tasks": task_reports,
+    }
+
+
+def _task_profile_report(task: TaskSpec) -> dict[str, object]:
+    if task.load_error:
+        return _failed_task_profile_report(task.name, task.description, task.load_error)
+    profile_text, profile_source = _task_profile_text(task)
+    if not profile_text:
+        return _failed_task_profile_report(task.name, task.description, "缺少 description 或 fields")
+    profile = build_task_profile(profile_text)
+    values, field_sources = _task_question_field_values(task)
+    missing_fields = _missing_keys(values)
+    task_type = profile.get("task_type", {})
+    complexity = profile.get("complexity", {})
+    complexity_level = str(complexity.get("level", "unknown")) if isinstance(complexity, dict) else "unknown"
+    risk_level = str(profile.get("risk_level", "unknown"))
+    return {
+        "name": task.name,
+        "description": task.description,
+        "profile_source": profile_source,
+        "input_error": "",
+        "task_type": task_type,
+        "complexity": complexity,
+        "complexity_level": complexity_level,
+        "risk_level": risk_level,
+        "risk_score": profile.get("risk_score", 0),
+        "risk_factors": profile.get("risk_factors", []),
+        "description_missing": profile.get("missing", []),
+        "present_fields": [key for key in ELEMENT_ORDER if key not in missing_fields],
+        "missing_fields": missing_fields,
+        "field_sources": field_sources,
+        "ask_strategy": profile.get("ask_strategy", ""),
+        "recommended_fields": profile.get("recommended_fields", {}),
+        "summary": _task_profile_summary(task_type, complexity_level, risk_level, profile.get("risk_score", 0), missing_fields),
+    }
+
+
+def _task_profile_text(task: TaskSpec) -> tuple[str, str]:
+    description = _normalize_description(task.description)
+    if description:
+        return description, "description"
+    field_text = _normalize_description(" ".join(value for value in task.fields.values() if value))
+    if field_text:
+        return field_text, "fields"
+    return "", "missing"
+
+
+def _failed_task_profile_report(task_name: str, description: str, reason: str) -> dict[str, object]:
+    return {
+        "name": task_name,
+        "description": description,
+        "profile_source": "missing",
+        "input_error": reason,
+        "task_type": {},
+        "complexity": {},
+        "complexity_level": "unknown",
+        "risk_level": "unknown",
+        "risk_score": 0,
+        "risk_factors": [],
+        "description_missing": list(ELEMENT_ORDER),
+        "present_fields": [],
+        "missing_fields": list(ELEMENT_ORDER),
+        "field_sources": {key: "missing" for key in ELEMENT_ORDER},
+        "ask_strategy": "",
+        "recommended_fields": {},
+        "summary": f"任务输入无效：{reason}",
+    }
+
+
+def _task_profile_summary(
+    task_type: object,
+    complexity_level: str,
+    risk_level: str,
+    risk_score: object,
+    missing_fields: list[str],
+) -> str:
+    task_label = task_type.get("label", "未知类型") if isinstance(task_type, dict) else "未知类型"
+    missing_text = _format_labels(missing_fields)
+    return f"类型 {task_label}，复杂度 {complexity_level}，风险 {risk_level}/{risk_score}，缺失要素：{missing_text}。"
+
+
+def _batch_profile_task_type_counts(task_reports: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts: dict[str, dict[str, object]] = {}
+    for report in task_reports:
+        task_type = report.get("task_type", {})
+        if not isinstance(task_type, dict):
+            continue
+        type_id = str(task_type.get("id", "unknown"))
+        if not type_id:
+            type_id = "unknown"
+        entry = counts.setdefault(type_id, {"id": type_id, "label": str(task_type.get("label", type_id)), "count": 0})
+        entry["count"] = int(entry["count"]) + 1
+    return sorted(counts.values(), key=lambda item: (-int(item["count"]), str(item["id"])))
+
+
+def _batch_profile_value_counts(task_reports: list[dict[str, object]], key: str) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for report in task_reports:
+        value = str(report.get(key, "unknown"))
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {"id": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _format_batch_profile_report(profile_report: dict[str, object]) -> str:
+    task_reports = profile_report.get("tasks", [])
+    if not isinstance(task_reports, list) or not task_reports:
+        return "批量任务画像：\n无任务。"
+    lines = [
+        "批量任务画像：",
+        f"任务类型分布：{_format_profile_count_entries(profile_report.get('task_type_counts', []), 'label')}",
+        f"复杂度分布：{_format_profile_count_entries(profile_report.get('complexity_counts', []), 'id')}",
+        f"风险分布：{_format_profile_count_entries(profile_report.get('risk_level_counts', []), 'id')}",
+        "",
+    ]
+    for task_report in task_reports:
+        if not isinstance(task_report, dict):
+            continue
+        lines.extend(_format_task_profile_lines(task_report))
+    return "\n".join(lines).rstrip()
+
+
+def _format_profile_count_entries(entries: object, label_key: str) -> str:
+    if not isinstance(entries, list) or not entries:
+        return "无"
+    parts: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get(label_key, entry.get("id", "unknown")))
+        parts.append(f"{label} {entry.get('count', 0)} 个")
+    return "、".join(parts) if parts else "无"
+
+
+def _format_task_profile_lines(task_report: dict[str, object]) -> list[str]:
+    name = task_report.get("name", "未知任务")
+    if task_report.get("input_error"):
+        return [f"- {name}：输入错误：{task_report.get('input_error')}"]
+    return [
+        (
+            f"- {name}：{task_report.get('summary', '')}"
+            f"画像来源：{task_report.get('profile_source', 'unknown')}。"
+        )
+    ]
+
+
+def _write_batch_profile_report(
+    profile_report: dict[str, object],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "task_profile": profile_report,
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_batch_profile_summary(profile_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    return (
+        "画像生成完成："
+        f"已画像 {profile_report.get('profiled_count', 0)} 个，"
+        f"输入错误 {profile_report.get('input_error_count', 0)} 个，"
+        f"高风险 {profile_report.get('high_risk_count', 0)} 个，"
+        f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+    )
 
 
 def _run_merge_supplements_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:

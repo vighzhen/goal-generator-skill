@@ -272,6 +272,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json
 # 从 JSON 批量生成前检查最终 /goal 文本质量，任一输出不合格则失败且不写出交付物
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-output --report-json output_lint_report.json
 
+# 批量生成前查看任务类型、复杂度、风险和 6 要素缺口组合画像
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-tasks --report-json task_profile.json
+
 # 批量扫描任务 path/inspect_path/target_path 指向的本地路径，生成代码上下文画像
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --inspect-paths --report-json path_inspection.json
 
@@ -357,6 +360,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
 - `--questions` 不生成 `/goal` 正文，而是按任务名汇总缺失要素并生成可直接发送的追问文案；可配合 `--output-file` 保存文案，配合 `--report-json` 保存任务级缺失结构。
+- `--profile-tasks` 不生成 `/goal` 正文，而是逐任务输出任务类型、复杂度、风险分数/层级、缺失要素和字段来源，并汇总类型/复杂度/风险分布；可配合 `--filter`、`--limit`、`--sort-by`、`--dedupe`、`--summary-only`、`--output-file` 和 `--report-json` 做批量清单评审。
 - `--merge-supplements <path>` 不生成 `/goal` 正文，而是读取按任务名组织的补充回答 JSON/CSV，把补充文本、显式 6 要素字段和原任务的 `description`/`fields` 合并为新的任务 JSON；可配合 `--output-file` 保存合并清单，配合 `--report-json` 查看字段来源、未匹配补充和剩余缺口，配合 `--check` 在仍缺要素、输入错误或补充任务名未匹配时失败退出。
 - `--inspect-paths` 不生成 `/goal` 正文，而是批量复用单任务 `--inspect-path` 的代码事实采集能力；支持 `--filter`、`--limit`、`--sort-by`、`--dedupe`、`--summary-only`、`--output-file` 和 `--report-json`，适合在批量生成前统一补齐边界、验证命令和风险线索。
 - `--enrich-from-paths` 不生成 `/goal` 正文，而是扫描任务路径并输出增强后的任务 JSON；它保留 `name`、`description`、`inspect_path`、`depends_on` 和用户已有 `fields`，只为缺失或仅由描述启发式推断的要素写入路径画像建议，并在 `--report-json` 的 `path_enrichment` 中记录字段来源、路径错误、剩余缺失和可生成状态。
@@ -412,6 +416,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 代码迁移/升级
 - 文档生成
 - 批量任务指令生成（JSON/CSV）
+- 批量任务类型、复杂度、风险和 6 要素缺口画像
 - 英文 Issue/PR/Jira 编码任务描述的 6 要素分析
 - 任务类型画像与 6 要素模板推荐
 - 缺失 6 要素的原因解释、优先级和补全建议
