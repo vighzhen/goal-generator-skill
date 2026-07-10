@@ -51,6 +51,14 @@ python3 scripts/generate_goal.py --profile "修复登录 API 在空 token 场景
 
 该功能适合把一句话需求快速转成“应该追问什么、优先确认什么、每个要素怎么写”的模板化建议。
 
+### 生成一次性追问文案
+
+使用 `--questions` 可把缺失要素分析结果转成可直接发给需求方的中文追问文本：
+
+```bash
+python3 scripts/generate_goal.py --questions "我要让 Codex 帮我给项目加单元测试"
+```
+
 ### 生成完整 /goal 指令
 
 当 6 个要素都已明确时，使用 `--generate` 传入字段并生成可复制的 `/goal` 指令纯文本：
@@ -156,5 +164,6 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 文档生成
 - 批量任务指令生成（JSON、CSV、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
+- 一键生成可复制的缺失要素追问文案
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。

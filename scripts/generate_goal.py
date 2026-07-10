@@ -311,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.profile:
             print(json.dumps(build_task_profile(args.profile), ensure_ascii=False, indent=2))
             return 0
+        if args.questions:
+            print(format_question_prompt(args.questions))
+            return 0
         if args.analyze:
             print(json.dumps(analyze_description(args.analyze), ensure_ascii=False, indent=2))
             return 0
@@ -330,6 +333,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="分析任务描述并生成 Codex CLI /goal 指令。")
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
+    parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--interactive", action="store_true", help="交互式补全要素并生成 /goal 指令。")
     parser.add_argument("--outcome", help="Outcome（目标结果）。")
@@ -355,6 +359,18 @@ def build_task_profile(description: str) -> dict[str, object]:
         "present": analysis["present"],
         "recommended_fields": template,
     }
+
+
+def format_question_prompt(description: str) -> str:
+    """把缺失要素分析结果转成可直接发送给用户的追问文本。"""
+    analysis = analyze_description(description)
+    if not analysis["missing"]:
+        return "这份需求已经覆盖 6 个必要要素，可以直接生成 /goal 指令。"
+    lines = ["你的需求还缺少以下信息，请补充：", ""]
+    for index, key in enumerate(analysis["missing"], start=1):
+        lines.append(f"{index}. {ELEMENT_LABELS[key]}：{QUESTION_EXAMPLES[key]}")
+    lines.extend(["", "你可以直接简短回答，我会帮你补全成完整指令。"])
+    return "\n".join(lines)
 
 
 def _infer_profile(text: str) -> tuple[str, str, dict[str, str]]:
