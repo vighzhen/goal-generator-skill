@@ -42,6 +42,19 @@ GOAL_FILE_SUFFIX = ".txt"
 TASK_SEPARATOR = "\n\n"
 SUMMARY_TEMPLATE = "处理完成：成功 {success_count} 个，跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
 DEFAULTS_JSON_ENV = "GOAL_GENERATOR_DEFAULTS_JSON"
+FIELD_STATUS_COLUMNS: tuple[str, ...] = (
+    "task_name",
+    "status",
+    "readiness_score",
+    "readiness_level",
+    "risk_level",
+    "risk_score",
+    "missing_before_defaults",
+    "defaulted",
+    "skip_reason",
+    "skip_suggestion",
+    *(f"{key}_status" for key in ELEMENT_ORDER),
+)
 CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
@@ -166,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
+    if args.field_status_csv:
+        return _run_field_status_csv_mode(tasks, args, default_values, start_time)
     dry_run = args.dry_run or args.check
     strict = args.strict or args.check
     summary_only = args.summary_only or args.check
@@ -208,6 +223,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--report-md", help="把批量处理结果写入便于人工评审的 Markdown 报告。")
     parser.add_argument("--missing-report-md", help="把每个任务的缺失要素、风险和补全建议写入 Markdown 报告。")
+    parser.add_argument("--field-status-csv", help="把每个任务 6 要素的 present/defaulted/missing/skipped 状态写入 CSV。")
     parser.add_argument("--index-md", help="为批量输出产物写入 Markdown 导航索引。")
     parser.add_argument("--include-profile", action="store_true", help="在 JSON 报告中附加任务类型、风险评分和追问策略画像。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
@@ -430,6 +446,28 @@ def _run_export_fields_json_mode(tasks: list[TaskSpec], args: argparse.Namespace
     stats = BatchStats(len(exports), len(skipped_tasks), time.perf_counter() - start_time)
     if args.report_json:
         _write_fields_export_report(exports, skipped_tasks, stats, Path(args.report_json))
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
+def _run_field_status_csv_mode(
+    tasks: list[TaskSpec],
+    args: argparse.Namespace,
+    default_values: dict[str, str],
+    start_time: float,
+) -> int:
+    strict = args.strict or args.check
+    outputs, skipped_tasks = _process_tasks(tasks, True, strict, args.dedupe, default_values, args.verbose)
+    stats = BatchStats(len(outputs), len(skipped_tasks), time.perf_counter() - start_time)
+    csv_path = Path(args.field_status_csv)
+    _write_field_status_csv(outputs, skipped_tasks, csv_path)
+    if args.report_json:
+        _write_report_json(outputs, skipped_tasks, stats, Path(args.report_json), None, None, args.include_profile)
+    if not args.summary_only:
+        print(f"已写入字段状态 CSV：{csv_path}")
     print(_format_summary(stats))
     fail_on_skipped = args.fail_on_skipped or args.check
     if fail_on_skipped and stats.skipped_count:
@@ -1227,6 +1265,68 @@ def _write_missing_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_field_status_csv(outputs: list[TaskOutput], skipped_tasks: list[SkippedTask], csv_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(FIELD_STATUS_COLUMNS))
+        writer.writeheader()
+        for output in outputs:
+            writer.writerow(_field_status_output_row(output))
+        for skipped in skipped_tasks:
+            writer.writerow(_field_status_skipped_row(skipped))
+
+
+def _field_status_output_row(output: TaskOutput) -> dict[str, str]:
+    score = score_description(output.task_description)
+    row = {
+        "task_name": output.task_name,
+        "status": "processed",
+        "readiness_score": str(score.get("readiness_score", "")),
+        "readiness_level": str(score.get("readiness_level", "unknown")),
+        "risk_level": str(score.get("risk_level", "unknown")),
+        "risk_score": str(score.get("risk_score", "")),
+        "missing_before_defaults": _csv_join(output.missing_before_defaults),
+        "defaulted": _csv_join(output.defaulted_keys),
+        "skip_reason": "",
+        "skip_suggestion": "",
+    }
+    for key in ELEMENT_ORDER:
+        row[f"{key}_status"] = _field_status_for_key(key, output)
+    return row
+
+
+def _field_status_for_key(key: str, output: TaskOutput) -> str:
+    if key in output.present_keys:
+        return "present"
+    if key in output.defaulted_keys:
+        return "defaulted"
+    if key in output.missing_before_defaults:
+        return "missing"
+    return "unknown"
+
+
+def _field_status_skipped_row(skipped: SkippedTask) -> dict[str, str]:
+    row = {
+        "task_name": skipped.task_name,
+        "status": "skipped",
+        "readiness_score": "",
+        "readiness_level": "",
+        "risk_level": "",
+        "risk_score": "",
+        "missing_before_defaults": "",
+        "defaulted": "",
+        "skip_reason": skipped.reason,
+        "skip_suggestion": skipped.suggestion,
+    }
+    for key in ELEMENT_ORDER:
+        row[f"{key}_status"] = "skipped"
+    return row
+
+
+def _csv_join(values: list[str]) -> str:
+    return ",".join(values)
 
 
 def _markdown_missing_table(outputs: list[TaskOutput]) -> list[str]:

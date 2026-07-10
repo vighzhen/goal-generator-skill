@@ -309,6 +309,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 输出缺失要素补全报告，便于团队只聚焦哪些任务还需要补信息
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --missing-report-md missing_report.md
 
+# 输出 6 要素字段状态 CSV，便于导入电子表格筛选 present/defaulted/skipped
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --field-status-csv field_status.csv
+
 # 在结构化报告中附加每个任务的类型、风险评分和追问策略，适合团队评审
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --include-profile --report-json batch_report.json
 
@@ -361,7 +364,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。传入 `--input -` 或位置参数 `-` 时，脚本会从标准输入读取任务流，并用 `--stdin-format jsonl`（默认）或 `--stdin-format json` 指定格式。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值；如果没有传入该参数，脚本会读取 `GOAL_GENERATOR_DEFAULTS_JSON` 环境变量作为团队默认值文件。若传入 `--list-tasks`，脚本只输出当前筛选、排序和限制后的任务名称，便于预览处理范围；若传入 `--profile-summary`，脚本只输出任务名称、类型、风险和缺失要素摘要，便于命令行快速评审；若传入 `--score-summary`，脚本只输出任务名称、`/goal` 可执行度分数、等级、风险和缺失要素，便于先定位最需要补信息的任务；若传入 `--score-report-md <path>`，脚本会写出可分享的 Markdown 可执行度评分报告。若传入 `--review-board-md <path>`，脚本会按 high_risk、incomplete、needs_review、ready 分组写出 Markdown 评审看板，适合团队批量需求评审。若传入 `--questions-md <path>`，脚本会为每个任务写出可直接发送给需求方的追问块和结构化问题表，适合批量补齐任务信息。若传入 `--fail-below-score <0-100>`，脚本会启用可执行度阈值门禁，任一任务低于阈值时返回退出码 1，并可通过 `--report-json` 或 `--score-report-md` 留存失败清单。若传入 `--export-fields-json <dir>`，脚本会为每个任务写出一份可编辑字段建议 JSON，批量输入中显式提供的字段会覆盖自动建议，适合先分发补齐再用 `--validate-fields-json` 和 `--generate --from-json` 生成最终指令。若传入 `--check`，脚本会启用 `--dry-run --strict --summary-only --fail-on-skipped` 的校验组合，适合 CI 或交付前检查。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议，方便自动化集成；同时传入 `--include-profile` 时，每个成功任务会追加任务类型、复杂度、风险评分、风险因素、追问策略和推荐 6 要素模板。若传入 `--report-md <path>`，脚本会写出适合人工审阅的 Markdown 批量报告，包含成功任务和跳过任务表格。若传入 `--missing-report-md <path>`，脚本会写出聚焦缺失要素的 Markdown 补全报告，列出需补全任务、风险等级、默认填充和推荐补法。若传入 `--index-md <path>`，脚本会为批量输出产物生成 Markdown 导航索引。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--sort-by name`，脚本会按任务名排序，默认 `--sort-by input` 保持输入顺序。若传入 `--limit <N>`，脚本只处理筛选和排序后的前 N 个任务，适合首次试跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。传入 `--input -` 或位置参数 `-` 时，脚本会从标准输入读取任务流，并用 `--stdin-format jsonl`（默认）或 `--stdin-format json` 指定格式。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素；若传入 `--defaults-json <path>`，可用 JSON 中的 6 要素字段覆盖这些默认值；如果没有传入该参数，脚本会读取 `GOAL_GENERATOR_DEFAULTS_JSON` 环境变量作为团队默认值文件。若传入 `--list-tasks`，脚本只输出当前筛选、排序和限制后的任务名称，便于预览处理范围；若传入 `--profile-summary`，脚本只输出任务名称、类型、风险和缺失要素摘要，便于命令行快速评审；若传入 `--score-summary`，脚本只输出任务名称、`/goal` 可执行度分数、等级、风险和缺失要素，便于先定位最需要补信息的任务；若传入 `--score-report-md <path>`，脚本会写出可分享的 Markdown 可执行度评分报告。若传入 `--review-board-md <path>`，脚本会按 high_risk、incomplete、needs_review、ready 分组写出 Markdown 评审看板，适合团队批量需求评审。若传入 `--questions-md <path>`，脚本会为每个任务写出可直接发送给需求方的追问块和结构化问题表，适合批量补齐任务信息。若传入 `--field-status-csv <path>`，脚本会写出可导入电子表格的字段状态矩阵，标明每个任务 6 要素是 present、defaulted 还是 skipped，便于筛选补齐。若传入 `--fail-below-score <0-100>`，脚本会启用可执行度阈值门禁，任一任务低于阈值时返回退出码 1，并可通过 `--report-json` 或 `--score-report-md` 留存失败清单。若传入 `--export-fields-json <dir>`，脚本会为每个任务写出一份可编辑字段建议 JSON，批量输入中显式提供的字段会覆盖自动建议，适合先分发补齐再用 `--validate-fields-json` 和 `--generate --from-json` 生成最终指令。若传入 `--check`，脚本会启用 `--dry-run --strict --summary-only --fail-on-skipped` 的校验组合，适合 CI 或交付前检查。若传入 `--strict`，仍缺失要素的任务会被跳过，用于质量门禁或 CI 检查；再配合 `--fail-on-skipped` 可让跳过任务转成非零退出码。若传入 `--report-json <path>`，脚本会额外写出成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议，方便自动化集成；同时传入 `--include-profile` 时，每个成功任务会追加任务类型、复杂度、风险评分、风险因素、追问策略和推荐 6 要素模板。若传入 `--report-md <path>`，脚本会写出适合人工审阅的 Markdown 批量报告，包含成功任务和跳过任务表格。若传入 `--missing-report-md <path>`，脚本会写出聚焦缺失要素的 Markdown 补全报告，列出需补全任务、风险等级、默认填充和推荐补法。若传入 `--index-md <path>`，脚本会为批量输出产物生成 Markdown 导航索引。若传入 `--filter <regex>`，脚本只处理任务名或描述匹配正则的任务，便于从大清单中局部重跑。若传入 `--sort-by name`，脚本会按任务名排序，默认 `--sort-by input` 保持输入顺序。若传入 `--limit <N>`，脚本只处理筛选和排序后的前 N 个任务，适合首次试跑。若传入 `--dedupe`，脚本会按任务名和描述跳过重复任务，并在 JSON 报告的 `skipped` 中记录原因。若传入 `--summary-only`，脚本不会在 stdout 打印每个任务正文，只保留最终摘要，适合大批量检查。
 
 ## 6 个必要要素
 
@@ -395,6 +398,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量 `/goal` 可执行度 Markdown 报告
 - 批量 `/goal` Markdown 评审看板
 - 批量缺失要素追问 Markdown 包
+- 批量 6 要素字段状态 CSV
 - 缺失 6 要素的原因解释、优先级和补全建议
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 内置任务模板 Markdown 展示
