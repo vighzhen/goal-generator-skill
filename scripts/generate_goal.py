@@ -381,6 +381,34 @@ INSPECT_TEST_NAME_PATTERNS: tuple[str, ...] = (
 INSPECT_MAX_FILES = 120
 INSPECT_SAMPLE_LIMIT = 20
 INSPECT_VERIFICATION_SAMPLE_LIMIT = 12
+PROJECT_CONFIG_SEARCH_DEPTH = 5
+PROJECT_VALIDATION_COMMAND_LIMIT = 12
+PROJECT_CONFIG_FILENAMES: tuple[str, ...] = (
+    "package.json",
+    "Makefile",
+    "makefile",
+    "GNUmakefile",
+    "pyproject.toml",
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+)
+PACKAGE_SCRIPT_PRIORITY: tuple[str, ...] = (
+    "test",
+    "test:unit",
+    "test:ci",
+    "test:coverage",
+    "lint",
+    "typecheck",
+    "type-check",
+    "build",
+)
+MAKE_TARGET_PRIORITY: tuple[str, ...] = ("test", "check", "lint", "typecheck", "type-check", "unit", "build", "ci")
 DEFAULT_PATH_HINT = "对应文件"
 MAX_INTERACTIVE_ROUNDS = 3
 INTERACTIVE_DEFAULTS: dict[str, str] = {
@@ -1210,7 +1238,8 @@ def inspect_path_context(path_value: str, task_description: str = "") -> dict[st
     files, truncated = _collect_inspection_files(root)
     language_counts = _inspection_language_counts(files)
     test_files = [file_path for file_path in files if _is_inspection_test_file(root, file_path)]
-    verification_hints = _inspection_verification_hints(root, files, language_counts)
+    project_validation = _inspection_project_validation(root)
+    verification_hints = _inspection_verification_hints(root, files, language_counts, project_validation)
     risk_flags = _inspection_risk_flags(root, files, language_counts, test_files, verification_hints, truncated)
     suggested_fields = _inspection_suggested_fields(
         root,
@@ -1229,6 +1258,7 @@ def inspect_path_context(path_value: str, task_description: str = "") -> dict[st
         "sample_files": [_display_path(file_path) for file_path in files[:INSPECT_SAMPLE_LIMIT]],
         "test_file_count": len(test_files),
         "test_files": [_display_path(file_path) for file_path in test_files[:INSPECT_SAMPLE_LIMIT]],
+        "project_validation": project_validation,
         "verification_hints": verification_hints,
         "risk_flags": risk_flags,
         "suggested_fields": suggested_fields,
@@ -1270,24 +1300,327 @@ def _inspection_verification_hints(
     root: Path,
     files: list[Path],
     language_counts: dict[str, int],
+    project_validation: dict[str, object],
 ) -> list[str]:
     hints: list[str] = []
     python_files = [file_path for file_path in files if file_path.suffix.lower() == ".py"]
     if python_files:
         hints.append(f"python3 -m py_compile {_join_shell_paths(python_files[:INSPECT_VERIFICATION_SAMPLE_LIMIT])}")
-        if _has_named_file_near(root, "pyproject.toml") or _has_named_file_near(root, "pytest.ini"):
+        if not _project_validation_has_command(project_validation, "python3 -m pytest") and (
+            _has_named_file_near(root, "pyproject.toml") or _has_named_file_near(root, "pytest.ini")
+        ):
             hints.append("python3 -m pytest")
+    hints.extend(_project_validation_command_hints(project_validation))
     if "JavaScript" in language_counts or "TypeScript" in language_counts:
-        hints.append("npm test（如项目 package.json 定义了 test 脚本）")
+        if not _project_validation_has_kind(project_validation, "node"):
+            hints.append("npm test（如项目 package.json 定义了 test 脚本）")
     if "Go" in language_counts:
-        hints.append("go test ./...")
+        if not _project_validation_has_command(project_validation, "go test ./..."):
+            hints.append("go test ./...")
     if "Rust" in language_counts:
-        hints.append("cargo test")
+        if not _project_validation_has_command(project_validation, "cargo test"):
+            hints.append("cargo test")
     if "Java" in language_counts or "Kotlin" in language_counts:
-        hints.append("运行项目现有 Gradle/Maven 测试命令")
+        if not _project_validation_has_kind(project_validation, "java"):
+            hints.append("运行项目现有 Gradle/Maven 测试命令")
     if not hints and files:
         hints.append("运行项目现有测试、构建或语法检查命令；若没有自动化验证，至少记录人工检查证据")
+    return _dedupe_strings(hints)
+
+
+def _inspection_project_validation(root: Path) -> dict[str, object]:
+    """从目标路径附近的项目配置中发现可执行验证命令。"""
+    config_paths = _nearby_project_config_paths(root)
+    commands: list[dict[str, str]] = []
+    notes: list[str] = []
+    for config_path in config_paths:
+        try:
+            config_commands, config_notes = _validation_commands_from_config(config_path)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            notes.append(f"读取 {_display_path(config_path)} 失败：{error}")
+            continue
+        commands.extend(config_commands)
+        notes.extend(config_notes)
+    commands = _dedupe_command_entries(commands)[:PROJECT_VALIDATION_COMMAND_LIMIT]
+    if not config_paths:
+        notes.append("未在目标路径附近发现常见项目配置文件，验证命令仍需结合项目文档人工确认。")
+    elif not commands:
+        notes.append("已发现项目配置文件，但未提取到 test/lint/typecheck/build 等常见验证命令。")
+    return {
+        "config_files": [_display_path(config_path) for config_path in config_paths],
+        "commands": commands,
+        "notes": _dedupe_strings(notes),
+    }
+
+
+def _nearby_project_config_paths(root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for directory in _inspection_candidate_directories(root):
+        for filename in PROJECT_CONFIG_FILENAMES:
+            config_path = directory / filename
+            if config_path.is_file():
+                paths.append(config_path)
+    return paths
+
+
+def _inspection_candidate_directories(root: Path) -> list[Path]:
+    start = root if root.is_dir() else root.parent
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for directory in [start, *start.parents]:
+        if len(candidates) >= PROJECT_CONFIG_SEARCH_DEPTH:
+            break
+        key = str(directory.resolve()) if directory.exists() else str(directory)
+        if key in seen:
+            continue
+        candidates.append(directory)
+        seen.add(key)
+    return candidates
+
+
+def _validation_commands_from_config(config_path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    filename = config_path.name
+    if filename == "package.json":
+        return _package_json_validation_commands(config_path)
+    if filename in {"Makefile", "makefile", "GNUmakefile"}:
+        return _makefile_validation_commands(config_path)
+    if filename in {"pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg"}:
+        return _python_project_validation_commands(config_path)
+    if filename == "go.mod":
+        return [_validation_command("go test ./...", _config_source(config_path), "go", "发现 go.mod，可运行 Go 全量测试。")], []
+    if filename == "Cargo.toml":
+        return [_validation_command("cargo test", _config_source(config_path), "rust", "发现 Cargo.toml，可运行 Rust 测试。")], []
+    if filename == "pom.xml":
+        return [_validation_command("mvn test", _config_source(config_path), "java", "发现 Maven pom.xml，可运行 Maven 测试。")], []
+    if filename in {"build.gradle", "build.gradle.kts"}:
+        return [
+            _validation_command(
+                _gradle_test_command(config_path.parent),
+                _config_source(config_path),
+                "java",
+                "发现 Gradle 构建文件，可运行 Gradle 测试。",
+            )
+        ], []
+    return [], []
+
+
+def _package_json_validation_commands(config_path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+    if not isinstance(scripts, dict) or not scripts:
+        return [], [f"{_display_path(config_path)} 未定义 scripts，无法提取 Node 验证命令。"]
+    package_manager = _node_package_manager(config_path.parent)
+    script_names = _selected_package_script_names(scripts)
+    commands = [
+        _validation_command(
+            _node_script_command(package_manager, script_name),
+            _config_source(config_path, f"scripts.{script_name}"),
+            "node",
+            f"package.json 定义 {script_name} 脚本：{_script_preview(scripts.get(script_name))}",
+        )
+        for script_name in script_names
+    ]
+    notes = [] if commands else [f"{_display_path(config_path)} 的 scripts 未包含常见 test/lint/typecheck/build 命令。"]
+    return commands, notes
+
+
+def _selected_package_script_names(scripts: dict[object, object]) -> list[str]:
+    available = {str(name): value for name, value in scripts.items() if _script_preview(value)}
+    selected: list[str] = [name for name in PACKAGE_SCRIPT_PRIORITY if name in available]
+    extra_names = sorted(
+        name
+        for name in available
+        if name not in selected and _looks_like_validation_script(name)
+    )
+    selected.extend(extra_names)
+    return selected[:PROJECT_VALIDATION_COMMAND_LIMIT]
+
+
+def _looks_like_validation_script(script_name: str) -> bool:
+    lowered_name = script_name.lower()
+    return any(keyword in lowered_name for keyword in ("test", "lint", "type", "check", "build", "ci"))
+
+
+def _node_package_manager(directory: Path) -> str:
+    if (directory / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (directory / "yarn.lock").exists():
+        return "yarn"
+    return "npm"
+
+
+def _node_script_command(package_manager: str, script_name: str) -> str:
+    quoted_script = shlex.quote(script_name)
+    if package_manager == "npm":
+        return "npm test" if script_name == "test" else f"npm run {quoted_script}"
+    if package_manager == "yarn":
+        return f"yarn {quoted_script}"
+    return f"pnpm run {quoted_script}"
+
+
+def _makefile_validation_commands(config_path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    text = config_path.read_text(encoding="utf-8")
+    targets = _makefile_targets(text)
+    selected_targets = _selected_make_targets(targets)
+    commands = [
+        _validation_command(
+            f"make {shlex.quote(target)}",
+            _config_source(config_path, target),
+            "make",
+            f"Makefile 定义 {target} 目标。",
+        )
+        for target in selected_targets
+    ]
+    notes = [] if commands else [f"{_display_path(config_path)} 未发现常见 test/check/lint/typecheck/build 目标。"]
+    return commands, notes
+
+
+def _makefile_targets(text: str) -> list[str]:
+    target_pattern = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])", re.MULTILINE)
+    targets: list[str] = []
+    seen: set[str] = set()
+    for match in target_pattern.finditer(text):
+        target = match.group(1)
+        if target in seen:
+            continue
+        targets.append(target)
+        seen.add(target)
+    return targets
+
+
+def _selected_make_targets(targets: list[str]) -> list[str]:
+    target_set = set(targets)
+    selected = [target for target in MAKE_TARGET_PRIORITY if target in target_set]
+    selected.extend(
+        target
+        for target in targets
+        if target not in selected and _looks_like_validation_script(target)
+    )
+    return selected[:PROJECT_VALIDATION_COMMAND_LIMIT]
+
+
+def _python_project_validation_commands(config_path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    text = config_path.read_text(encoding="utf-8")
+    filename = config_path.name
+    if filename == "pytest.ini":
+        return [_validation_command("python3 -m pytest", _config_source(config_path), "python", "发现 pytest.ini。")], []
+    if filename == "tox.ini":
+        return _tox_validation_commands(config_path, text)
+    if filename == "setup.cfg":
+        return _setup_cfg_validation_commands(config_path, text)
+    return _pyproject_validation_commands(config_path, text)
+
+
+def _pyproject_validation_commands(config_path: Path, text: str) -> tuple[list[dict[str, str]], list[str]]:
+    commands: list[dict[str, str]] = []
+    if _has_toml_section(text, "tool.pytest"):
+        commands.append(_validation_command("python3 -m pytest", _config_source(config_path, "tool.pytest"), "python", "pyproject.toml 定义 pytest 配置。"))
+    if _has_toml_section(text, "tool.ruff"):
+        commands.append(_validation_command("python3 -m ruff check .", _config_source(config_path, "tool.ruff"), "python", "pyproject.toml 定义 ruff 配置。"))
+    if _has_toml_section(text, "tool.mypy"):
+        commands.append(_validation_command("python3 -m mypy .", _config_source(config_path, "tool.mypy"), "python", "pyproject.toml 定义 mypy 配置。"))
+    if _has_toml_section(text, "tool.pyright"):
+        commands.append(_validation_command("python3 -m pyright", _config_source(config_path, "tool.pyright"), "python", "pyproject.toml 定义 pyright 配置。"))
+    if _has_toml_section(text, "tool.black"):
+        commands.append(_validation_command("python3 -m black --check .", _config_source(config_path, "tool.black"), "python", "pyproject.toml 定义 black 配置。"))
+    notes = [] if commands else [f"{_display_path(config_path)} 未发现 tool.pytest/ruff/mypy/pyright/black 等验证配置。"]
+    return commands, notes
+
+
+def _tox_validation_commands(config_path: Path, text: str) -> tuple[list[dict[str, str]], list[str]]:
+    commands = [_validation_command("python3 -m tox", _config_source(config_path, "tox"), "python", "发现 tox.ini。")]
+    if _has_ini_section(text, "pytest"):
+        commands.append(_validation_command("python3 -m pytest", _config_source(config_path, "pytest"), "python", "tox.ini 同时定义 pytest 配置。"))
+    return commands, []
+
+
+def _setup_cfg_validation_commands(config_path: Path, text: str) -> tuple[list[dict[str, str]], list[str]]:
+    commands: list[dict[str, str]] = []
+    if _has_ini_section(text, "tool:pytest"):
+        commands.append(_validation_command("python3 -m pytest", _config_source(config_path, "tool:pytest"), "python", "setup.cfg 定义 pytest 配置。"))
+    if _has_ini_section(text, "mypy"):
+        commands.append(_validation_command("python3 -m mypy .", _config_source(config_path, "mypy"), "python", "setup.cfg 定义 mypy 配置。"))
+    if _has_ini_section(text, "flake8"):
+        commands.append(_validation_command("python3 -m flake8 .", _config_source(config_path, "flake8"), "python", "setup.cfg 定义 flake8 配置。"))
+    notes = [] if commands else [f"{_display_path(config_path)} 未发现 tool:pytest/mypy/flake8 等验证配置。"]
+    return commands, notes
+
+
+def _has_toml_section(text: str, section_prefix: str) -> bool:
+    lowered_text = text.lower()
+    return f"[{section_prefix.lower()}" in lowered_text
+
+
+def _has_ini_section(text: str, section_name: str) -> bool:
+    return f"[{section_name.lower()}]" in text.lower()
+
+
+def _gradle_test_command(directory: Path) -> str:
+    if (directory / "gradlew").exists():
+        return "./gradlew test"
+    return "gradle test"
+
+
+def _validation_command(command: str, source: str, kind: str, reason: str) -> dict[str, str]:
+    return {"command": command, "source": source, "kind": kind, "reason": reason}
+
+
+def _config_source(config_path: Path, section: str = "") -> str:
+    display_path = _display_path(config_path)
+    return f"{display_path}:{section}" if section else display_path
+
+
+def _script_preview(value: object) -> str:
+    preview = str(value).strip() if value is not None else ""
+    return preview[:TEXT_PREVIEW_LENGTH]
+
+
+def _dedupe_command_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    unique_entries: list[dict[str, str]] = []
+    seen_commands: set[str] = set()
+    for entry in entries:
+        command = entry.get("command", "").strip()
+        if not command or command in seen_commands:
+            continue
+        unique_entries.append(entry)
+        seen_commands.add(command)
+    return unique_entries
+
+
+def _project_validation_command_hints(project_validation: dict[str, object]) -> list[str]:
+    hints: list[str] = []
+    for entry in _project_validation_commands(project_validation):
+        command = entry.get("command", "").strip()
+        source = entry.get("source", "项目配置").strip() or "项目配置"
+        if command:
+            hints.append(f"{command}（来自 {source}）")
     return hints
+
+
+def _project_validation_commands(project_validation: dict[str, object]) -> list[dict[str, str]]:
+    raw_commands = project_validation.get("commands", [])
+    if not isinstance(raw_commands, list):
+        return []
+    return [entry for entry in raw_commands if isinstance(entry, dict)]
+
+
+def _project_validation_has_command(project_validation: dict[str, object], command: str) -> bool:
+    return any(entry.get("command") == command for entry in _project_validation_commands(project_validation))
+
+
+def _project_validation_has_kind(project_validation: dict[str, object], kind: str) -> bool:
+    return any(entry.get("kind") == kind for entry in _project_validation_commands(project_validation))
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    unique_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        if value in seen_values:
+            continue
+        unique_values.append(value)
+        seen_values.add(value)
+    return unique_values
 
 
 def _join_shell_paths(paths: list[Path]) -> str:

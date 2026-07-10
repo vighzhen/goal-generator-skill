@@ -70,7 +70,7 @@ python3 scripts/generate_goal.py --redaction-check "修复登录问题，token=a
 python3 scripts/generate_goal.py --inspect-path scripts --path-task "优化 goal 生成器的输入分析能力"
 ```
 
-输出包含 `language_counts`、`sample_files`、`test_files`、`verification_hints`、`risk_flags` 和 `suggested_fields`。建议先复核 `suggested_fields.outcome` 是否符合真实目标，再保存为 JSON 并配合 `--validate-fields-json` 与 `--generate --from-json` 生成最终 `/goal`。
+输出包含 `language_counts`、`sample_files`、`test_files`、`project_validation`、`verification_hints`、`risk_flags` 和 `suggested_fields`。其中 `project_validation` 会从目标路径附近的 `package.json`、`Makefile`、`pyproject.toml`、`pytest.ini`、`go.mod`、`Cargo.toml`、`pom.xml`、`build.gradle` 等常见配置中提取 test/lint/typecheck/build 命令及来源证据。建议先复核 `suggested_fields.outcome` 是否符合真实目标，再保存为 JSON 并配合 `--validate-fields-json` 与 `--generate --from-json` 生成最终 `/goal`。
 
 ### 解释缺失要素
 
@@ -301,7 +301,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 英文 Issue/PR/Jira 编码任务描述的 6 要素分析
 - 任务类型画像与 6 要素模板推荐
 - 缺失 6 要素的原因解释、优先级和补全建议
-- 从本地文件或目录反向整理 `/goal` 边界、验证命令和风险线索
+- 从本地文件或目录反向整理 `/goal` 边界、项目配置验证命令和风险线索
 - 单任务敏感信息检查和脱敏预览
 - 单任务 6 要素字段 JSON 质量校验
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
