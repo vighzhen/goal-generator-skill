@@ -123,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         require_existing_task_path = _require_existing_task_path_from_args(args)
         allowed_path_roots = _allowed_path_roots_from_args(args)
         require_unique_task_names = _require_unique_task_names_from_args(args)
+        required_name_pattern = _required_name_pattern_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -214,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         require_existing_task_path,
         allowed_path_roots,
         require_unique_task_names,
+        required_name_pattern,
     )
     output_lint_report = None
     if args.lint_output:
@@ -269,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     if allowed_path_roots and (_has_required_path_skips(skipped_tasks) or _has_allowed_path_root_skips(skipped_tasks)):
         return 1
     if require_unique_task_names and _has_duplicate_name_skips(skipped_tasks):
+        return 1
+    if required_name_pattern and _has_name_pattern_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -342,6 +346,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-unique-task-names",
         action="store_true",
         help="真实生成、dry-run、check 或 lint-output 时要求每个任务 name 唯一。",
+    )
+    parser.add_argument(
+        "--require-name-pattern",
+        help="真实生成、dry-run、check 或 lint-output 时要求每个任务 name 匹配该正则表达式。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -522,6 +530,31 @@ def _require_unique_task_names_from_args(args: argparse.Namespace) -> bool:
     ):
         raise ValueError("--require-unique-task-names 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return True
+
+
+def _required_name_pattern_from_args(args: argparse.Namespace) -> re.Pattern[str] | None:
+    pattern_value = args.require_name_pattern
+    if pattern_value is None:
+        return None
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-name-pattern 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    if not pattern_value:
+        raise ValueError("--require-name-pattern 必须提供非空正则表达式")
+    try:
+        return re.compile(pattern_value)
+    except re.error as error:
+        raise ValueError(f"--require-name-pattern 正则无效：{error}") from error
 
 
 def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
@@ -2705,6 +2738,7 @@ def _process_tasks(
     require_existing_task_path: bool = False,
     allowed_path_roots: list[Path] | None = None,
     require_unique_task_names: bool = False,
+    required_name_pattern: re.Pattern[str] | None = None,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2720,6 +2754,12 @@ def _process_tasks(
             continue
         if task.name in duplicate_names:
             reason = _duplicate_task_name_error(task.name)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        if required_name_pattern and not required_name_pattern.search(task.name):
+            reason = _name_pattern_error(task.name, required_name_pattern.pattern)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -2779,6 +2819,14 @@ def _has_duplicate_name_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("重复任务名" in skipped.reason for skipped in skipped_tasks)
 
 
+def _name_pattern_error(task_name: str, pattern: str) -> str:
+    return f"任务名称不匹配正则：{task_name}；--require-name-pattern 要求匹配：{pattern}"
+
+
+def _has_name_pattern_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("任务名称不匹配正则" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -2794,6 +2842,8 @@ def _skip_suggestion(reason: str) -> str:
         return "把任务 path 调整到允许根目录内，或确认范围后扩展 --allowed-path-roots。"
     if "重复任务名" in reason:
         return "为同名任务改成唯一 name；如果确实是重复任务，可先使用 --dedupe 移除完全重复项。"
+    if "任务名称不匹配正则" in reason:
+        return "按 --require-name-pattern 指定的团队命名规则调整任务 name，或确认后放宽正则。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:

@@ -314,6 +314,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 名称唯一门禁：同名任务会跳过并返回非零退出码，避免补充回答和依赖引用歧义
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-unique-task-names --report-json batch_report.json
 
+# 名称正则门禁：任务名必须以 Jira/Issue 编号开头
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-name-pattern '^[A-Z]+-[0-9]+' --report-json batch_report.json
+
 # 路径必填门禁：每个任务必须提供 path/inspect_path/target_path 作为代码上下文锚点
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-task-path --report-json batch_report.json
 
@@ -399,6 +402,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--require-unique-task-names` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；同名任务会全部跳过并返回非零退出码，适合依赖计划、补充回答合并或人工审计前确保任务身份唯一。
+- `--require-name-pattern <regex>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务名不匹配给定 Python 正则时会跳过并返回非零退出码，适合把 Jira/Issue 编号、模块前缀或团队命名规范接入批量生成门禁。
 - `--require-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；没有 `path`、`inspect_path` 或 `target_path` 的任务会跳过并让命令返回非零退出码，适合要求批量任务全部绑定代码上下文锚点的团队。
 - `--require-existing-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务缺少路径字段或路径不存在时会跳过并返回非零退出码，适合生成前确保批量任务路径锚点在当前仓库中真实可访问。
 - `--allowed-path-roots <根目录列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务路径必须位于任一允许根目录内，根目录列表用逗号、分号、顿号或换行分隔。该门禁会要求任务提供路径字段，但不单独检查路径存在性；如需同时检查存在性可配合 `--require-existing-task-path`。
