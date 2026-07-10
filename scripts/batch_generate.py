@@ -78,6 +78,7 @@ class TaskOutput:
 class SkippedTask:
     task_name: str
     reason: str
+    suggestion: str
 
 
 @dataclass(frozen=True)
@@ -340,14 +341,17 @@ def _process_tasks(
     seen_task_keys: set[str] = set()
     for index, task in enumerate(tasks, start=1):
         if dedupe and _is_duplicate_task(task, seen_task_keys):
-            skipped_tasks.append(SkippedTask(task.name, "重复任务：任务名和描述已出现过"))
+            reason = "重复任务：任务名和描述已出现过"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
             continue
         try:
             output = _process_one_task(task, index, dry_run, strict, used_slugs, verbose)
             outputs.append(output)
         except (ValueError, OSError) as error:
-            skipped_tasks.append(SkippedTask(task.name, str(error)))
-            print(f"跳过任务 {task.name}：{error}", file=sys.stderr)
+            reason = str(error)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
     return outputs, skipped_tasks
 
 
@@ -361,6 +365,22 @@ def _is_duplicate_task(task: TaskSpec, seen_task_keys: set[str]) -> bool:
 
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
+
+
+def _skip_suggestion(reason: str) -> str:
+    if "缺少 description" in reason:
+        return "为该任务补充 description 字段，说明编码目标和上下文。"
+    if "strict 模式缺失要素" in reason:
+        return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
+    if "JSONL" in reason and "解析失败" in reason:
+        return "检查对应行是否是单行合法 JSON 对象，字符串内部双引号需要转义。"
+    if "必须是对象" in reason:
+        return "把该任务改成包含 name、description、fields 的对象。"
+    if "不支持的输入格式" in reason:
+        return "改用 .json、.jsonl、.csv、.md 或 .markdown 输入文件。"
+    if "重复任务" in reason:
+        return "确认是否确实重复；如需全部保留，请移除 --dedupe。"
+    return "检查输入文件格式和任务字段后重试。"
 
 
 def _process_one_task(
@@ -557,7 +577,7 @@ def _task_report(output: TaskOutput) -> dict[str, object]:
 
 
 def _skipped_report(skipped: SkippedTask) -> dict[str, str]:
-    return {"name": skipped.task_name, "reason": skipped.reason}
+    return {"name": skipped.task_name, "reason": skipped.reason, "suggestion": skipped.suggestion}
 
 
 def _unique_slug(name: str, index: int, used_slugs: set[str]) -> str:

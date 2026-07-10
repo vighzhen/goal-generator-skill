@@ -141,7 +141,7 @@
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 任务风险评分 | 用户拿到 profile 后仍难判断任务是否适合直接交给 Codex 执行，缺少风险强弱和原因排序。 | 在 generate_goal.py 的 --profile 输出中新增 risk_score、risk_level 和 risk_factors，基于缺失要素、复杂度和高风险关键词给出评分。 | 已实现 | 待提交 |
-| 2 | 批量错误修复建议 | 批量任务被跳过时当前只有原因，没有告诉用户如何修复输入文件；新手需要可操作建议。 | 在 batch_generate.py 的跳过记录和 --report-json 中新增 suggestion 字段，针对缺 description、strict 缺要素、JSONL 解析失败等常见错误给出修复建议。 | 待实现 | - |
+| 2 | 批量错误修复建议 | 批量任务被跳过时当前只有原因，没有告诉用户如何修复输入文件；新手需要可操作建议。 | 在 batch_generate.py 的跳过记录和 --report-json 中新增 suggestion 字段，针对缺 description、strict 缺要素、JSONL 解析失败等常见错误给出修复建议。 | 已实现 | 待提交 |
 
 ### 本轮总结
 
