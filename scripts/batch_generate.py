@@ -34,6 +34,7 @@ class TaskSpec:
     name: str
     description: str
     fields: dict[str, str]
+    load_error: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,7 +154,7 @@ def _remove_empty_fields(fields: dict[str, str]) -> dict[str, str]:
 
 def _invalid_task(index: int, name: str, description: str) -> TaskSpec:
     task_name = name or _default_task_name(index)
-    return TaskSpec(name=task_name, description=description, fields={})
+    return TaskSpec(name=task_name, description="", fields={}, load_error=description)
 
 
 def _process_tasks(
@@ -181,6 +182,8 @@ def _process_one_task(
     used_slugs: set[str],
     verbose: bool,
 ) -> TaskOutput:
+    if task.load_error:
+        raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
     prepared = _prepare_task(task)
