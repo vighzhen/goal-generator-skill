@@ -419,9 +419,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.risk_card:
             _emit_output(format_risk_card(args.risk_card), args.output_file)
             return 0
-        if args.review_card:
-            _emit_output(format_review_card(args.review_card), args.output_file)
-            return 0
         if args.questions_json:
             _emit_output(json.dumps(build_question_pack(args.questions_json), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -472,7 +469,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--goal-json", help="生成面向 IDE、机器人或流水线的 Goal JSON 草稿，包含 6 要素、复核状态、校验结果和下一步命令。")
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
     parser.add_argument("--risk-card", help="生成单任务 Markdown 风险卡片，汇总风险因素、复杂度和缓解建议。")
-    parser.add_argument("--review-card", help="生成单任务 Markdown 评审卡片，汇总评分、风险、缺失项和追问文案。")
     parser.add_argument("--questions-json", help="生成机器可读的缺失要素追问包 JSON，适合 IDE、表单或机器人集成。")
     parser.add_argument("--suggest-fields", help="从任务描述生成可编辑的 6 要素字段建议 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
@@ -528,7 +524,6 @@ def build_capabilities() -> dict[str, object]:
                 "--goal-json",
                 "--redaction-check",
                 "--risk-card",
-                "--review-card",
                 "--questions-json",
                 "--suggest-fields",
                 "--explain-missing",
@@ -626,11 +621,6 @@ def build_usage_examples() -> dict[str, object]:
                 "name": "检查敏感信息",
                 "scenario": "把任务描述分享给机器人、Issue 或外部系统前，先发现 token、邮箱、URL 等可能需要脱敏的内容。",
                 "command": "python3 scripts/generate_goal.py --redaction-check '修复登录问题，token=abcdef1234567890，联系 owner@example.com'",
-            },
-            {
-                "name": "生成 Markdown 评审卡片",
-                "scenario": "需要把一个任务的评分、风险、缺失项和追问文案贴到 PR、Issue 或群聊。",
-                "command": "python3 scripts/generate_goal.py --review-card '给项目加单元测试'",
             },
             {
                 "name": "生成风险卡片",
@@ -1225,36 +1215,6 @@ def _redaction_recommended_action(risk_level: str, findings: list[dict[str, obje
     if risk_level == "high":
         return "共享前必须移除或替换所有 high/critical 敏感片段，并重新运行 --redaction-check。"
     return "共享前建议确认发现项是否可公开；不能公开时使用 redacted_preview 或占位符替换。"
-
-
-def format_review_card(description: str) -> str:
-    """生成便于人工评审和分享的单任务 Markdown 卡片。"""
-    if not description.strip():
-        raise ValueError("--review-card 不能为空，请提供任务描述")
-    score = score_description(description)
-    profile = build_task_profile(description)
-    suggestion = suggest_goal_fields(description)
-    explain = explain_missing_elements(description)
-    task_type = profile.get("task_type", {})
-    task_label = task_type.get("label", "未知") if isinstance(task_type, dict) else "未知"
-    lines = [
-        "# Goal Review Card",
-        "",
-        f"- 描述：{_markdown_inline(_normalize_text(description)[:TEXT_PREVIEW_LENGTH])}",
-        f"- 任务类型：{_markdown_inline(str(task_label))}",
-        f"- 可执行度：{score.get('readiness_score', 0)}/100（{score.get('readiness_level', 'unknown')}）",
-        f"- 风险：{profile.get('risk_level', 'unknown')}（{profile.get('risk_score', 0)}）",
-        f"- 下一步：{_markdown_inline(str(score.get('next_action', '')))}",
-        "",
-        "## 缺失要素",
-        "",
-    ]
-    lines.extend(_review_missing_lines(score))
-    lines.extend(["", "## 推荐 6 要素草稿", ""])
-    lines.extend(_review_fields_table(suggestion))
-    lines.extend(["", "## 可直接发送的追问", ""])
-    lines.append(_markdown_block(str(explain.get("next_prompt", ""))))
-    return "\n".join(lines)
 
 
 def format_risk_card(description: str) -> str:
