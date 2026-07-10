@@ -84,7 +84,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 英文任务描述理解 | 用户或团队常用英文写 Issue、PR、Jira 或脚本参数，如 “Add unit tests for src/services and run pytest”；当前关键词主要面向中文，英文描述会被误判为缺少 Outcome/Verification/Constraints 等要素，必须手工翻译或补写中文。 | 在 `scripts/generate_goal.py` 的要素识别、任务类型画像、风险关键词、分支/commit 推断中补充常见英文动作、验证、约束、边界、迭代和阻塞词；同步更新 README 和 SKILL，验证英文 `--analyze`/`--profile` 可识别真实要素。 | 待实现 | 待回填 |
+| 1 | 英文任务描述理解 | 用户或团队常用英文写 Issue、PR、Jira 或脚本参数，如 “Add unit tests for src/services and run pytest”；当前关键词主要面向中文，英文描述会被误判为缺少 Outcome/Verification/Constraints 等要素，必须手工翻译或补写中文。 | 在 `scripts/generate_goal.py` 的要素识别、任务类型画像、风险关键词、分支/commit 推断中补充常见英文动作、验证、约束、边界、迭代和阻塞词；同步更新 README 和 SKILL，验证英文 `--analyze`/`--profile` 可识别真实要素。 | 已实现 | e4e487d |
 
 #### 去重审查
 
@@ -102,7 +102,7 @@
 
 ### 本轮总结
 
-进行中：已完成第 3 轮审查清单，计划实现 1 个非中文任务描述理解增强功能。
+修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、英文 `--analyze` 与英文 `--profile` 示例验证、完整 `--generate` 端到端验证。
 
 ## 用户纠正记录
 
@@ -112,9 +112,10 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 3 轮；累计修复 2 个问题，新增 2 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 3 轮；累计修复 2 个问题，新增 3 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
 - 第 2 轮：批量任务依赖计划（42b3f12）
-剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令；批量依赖计划依赖用户显式填写准确任务名，不能从自然语言自动证明真实工程依赖。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标和任务关系。
+- 第 3 轮：英文任务描述理解（e4e487d）
+剩余风险：路径扫描基于文件名、后缀和轻量规则推断验证命令；批量依赖计划依赖用户显式填写准确任务名；英文识别覆盖常见编码任务关键词但仍是启发式规则，复杂长句或领域缩写可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标和任务关系。
