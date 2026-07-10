@@ -204,7 +204,7 @@
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 批量校验清单模式 | 团队交付前常只想确认任务文件是否可读、缺哪些字段、是否有跳过项，不一定要生成正文；当前需要组合 dry-run/strict/report 参数。 | 在 batch_generate.py 新增 --check 快捷模式，等价于 dry-run + strict + summary-only + fail-on-skipped，并保留 report-json 能力。 | 已实现 | 待提交 |
-| 2 | 环境变量默认值 | CI 或团队脚本里不方便每次都传 --defaults-json；希望通过环境变量指定团队默认值文件。 | 在 batch_generate.py 支持 GOAL_GENERATOR_DEFAULTS_JSON 环境变量作为 --defaults-json 的后备来源，命令行参数优先。 | 待实现 | - |
+| 2 | 环境变量默认值 | CI 或团队脚本里不方便每次都传 --defaults-json；希望通过环境变量指定团队默认值文件。 | 在 batch_generate.py 支持 GOAL_GENERATOR_DEFAULTS_JSON 环境变量作为 --defaults-json 的后备来源，命令行参数优先。 | 已实现 | 待提交 |
 
 ### 本轮总结
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 import time
@@ -35,6 +36,7 @@ DEFAULT_NAME_PREFIX = "task"
 GOAL_FILE_SUFFIX = ".txt"
 TASK_SEPARATOR = "\n\n"
 SUMMARY_TEMPLATE = "处理完成：成功 {success_count} 个，跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
+DEFAULTS_JSON_ENV = "GOAL_GENERATOR_DEFAULTS_JSON"
 CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
@@ -195,9 +197,10 @@ def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
 
 def _load_default_values(defaults_json: str | None) -> dict[str, str]:
     defaults = dict(INTERACTIVE_DEFAULTS)
-    if not defaults_json:
+    defaults_path = defaults_json or os.environ.get(DEFAULTS_JSON_ENV)
+    if not defaults_path:
         return defaults
-    data = json.loads(Path(defaults_json).read_text(encoding="utf-8"))
+    data = json.loads(Path(defaults_path).read_text(encoding="utf-8"))
     raw_defaults = data.get("fields", data) if isinstance(data, dict) else data
     overrides = _fields_from_mapping(raw_defaults)
     if not overrides:
