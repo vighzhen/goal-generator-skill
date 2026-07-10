@@ -54,8 +54,8 @@
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | scripts/batch_generate.py::_build_parser/main | 目标验证命令使用 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`，但当前 CLI 只接受 `--input`，导致验证命令失败；在不改变 `--input` 语义的前提下应兼容一个可选位置参数，降低用户误用成本。 | 待处理 | TBD |
+| 1 | P1 | scripts/batch_generate.py::_build_parser/main | 目标验证命令使用 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`，但当前 CLI 只接受 `--input`，导致验证命令失败；在不改变 `--input` 语义的前提下应兼容一个可选位置参数，降低用户误用成本。 | 已修复 | 本提交 |
 
 ### 本轮总结
 
-发现 1 个问题，修复 0 个，跳过 0 个。
+发现 1 个问题，修复 1 个，跳过 0 个。

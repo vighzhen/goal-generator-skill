@@ -106,7 +106,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 ```
 
-`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
+输入文件推荐使用 `--input` 显式指定；脚本也兼容 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run` 这种位置参数写法。`--output-dir` 和 `--output-file` 互斥，不能同时指定。任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 
 ## 6 个必要要素
 

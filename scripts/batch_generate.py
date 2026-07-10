@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     start_time = time.perf_counter()
     try:
-        tasks = _load_tasks(Path(args.input))
+        tasks = _load_tasks(_input_path_from_args(args))
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
@@ -95,13 +95,22 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量生成 Codex CLI /goal 指令。")
-    parser.add_argument("--input", required=True, help="输入文件路径，支持 .json 或 .csv。")
+    parser.add_argument("input_path", nargs="?", help="输入文件路径，可替代 --input。")
+    parser.add_argument("--input", help="输入文件路径，支持 .json 或 .csv。")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--verbose", action="store_true", help="打印详细处理日志。")
     return parser
+
+
+
+def _input_path_from_args(args: argparse.Namespace) -> Path:
+    input_value = args.input or args.input_path
+    if not input_value:
+        raise ValueError("必须提供 --input 或位置输入文件路径")
+    return Path(input_value)
 
 
 def _load_tasks(input_path: Path) -> list[TaskSpec]:
