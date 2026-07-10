@@ -70,6 +70,40 @@
 
 修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、有效/无效 `--plan-dependencies` 示例验证、完整 `--generate` 端到端验证。
 
+## 第 3 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 3 轮要求重新通读全部 7 个范围内文件及前两轮新增功能；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 英文任务描述理解 | 用户或团队常用英文写 Issue、PR、Jira 或脚本参数，如 “Add unit tests for src/services and run pytest”；当前关键词主要面向中文，英文描述会被误判为缺少 Outcome/Verification/Constraints 等要素，必须手工翻译或补写中文。 | 在 `scripts/generate_goal.py` 的要素识别、任务类型画像、风险关键词、分支/commit 推断中补充常见英文动作、验证、约束、边界、迭代和阻塞词；同步更新 README 和 SKILL，验证英文 `--analyze`/`--profile` 可识别真实要素。 | 待实现 | 待回填 |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 英文任务描述理解 | `--analyze` 中文缺失要素分析 | 不是输出格式变化，而是扩展输入语言和意图识别覆盖面，让英文任务无需翻译即可被分析。 | 通过 |
+| 英文任务描述理解 | `--profile` 任务类型画像 | 现有画像规则主要靠中文关键词；新功能扩展任务类型推断的语言覆盖，解决英语 Issue/PR 场景。 | 通过 |
+| 英文任务描述理解 | `--inspect-path` 路径上下文画像 | `--inspect-path` 从文件系统推断上下文；新功能从英文自然语言中识别 6 要素，两者输入来源和使用场景不同。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 英文任务描述理解 | 英文 Issue/PR/Jira 中的编码任务需要直接转成 `/goal`，尤其是跨语言团队或脚本自动化传参。 | 先人工翻译成中文，或接受分析结果大量误报缺失项，再手工补齐 6 要素。 | 英文描述可直接被 `--analyze`/`--profile` 识别，减少翻译步骤和误追问，提高任务理解覆盖面。 | 扩展自然语言理解能力和输入场景，不是把同一结果换成另一种展示。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 3 轮审查清单，计划实现 1 个非中文任务描述理解增强功能。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -78,7 +112,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 2 轮；累计修复 2 个问题，新增 2 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 3 轮；累计修复 2 个问题，新增 2 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
