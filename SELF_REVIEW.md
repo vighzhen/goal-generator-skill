@@ -224,12 +224,12 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 单任务 JSON 输入 | 自动化系统常已把 6 要素保存成 JSON 文件，当前还要展开成 6 个 CLI 参数，容易复制出错。 | 在 generate_goal.py 新增 --from-json <path>，配合 --generate 从 JSON 或 fields 对象读取 6 要素，命令行显式字段可覆盖文件。 | 已实现 | 待提交 |
-| 2 | 批量报告输出路径记录 | 使用 --output-dir 生成多个文件时，JSON 报告只有 file_slug，调用方还需要自己拼接路径，不利于自动打开或上传产物。 | 在 batch_generate.py 的 report-json 中为成功任务补充 output_path 字段；控制台输出时为空，output-dir/output-file 时记录实际产物路径。 | 已实现 | 待提交 |
+| 1 | 单任务 JSON 输入 | 自动化系统常已把 6 要素保存成 JSON 文件，当前还要展开成 6 个 CLI 参数，容易复制出错。 | 在 generate_goal.py 新增 --from-json <path>，配合 --generate 从 JSON 或 fields 对象读取 6 要素，命令行显式字段可覆盖文件。 | 已实现 | f3fbe12 |
+| 2 | 批量报告输出路径记录 | 使用 --output-dir 生成多个文件时，JSON 报告只有 file_slug，调用方还需要自己拼接路径，不利于自动打开或上传产物。 | 在 batch_generate.py 的 report-json 中为成功任务补充 output_path 字段；控制台输出时为空，output-dir/output-file 时记录实际产物路径。 | 已实现 | 5e24e7a |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
