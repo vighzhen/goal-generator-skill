@@ -529,28 +529,32 @@
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | README.md | 第 15 轮已让 `--merge-supplements` 输出的新任务 JSON 保留 `inspect_path`，但 README 的“批量合并补充回答”段仍写成仅保留 `name`、`description`、`depends_on` 和 `fields`，会让用户误以为路径上下文在补充合并后丢失。 | 待修复 | - |
+| 1 | P1 | README.md | 第 15 轮已让 `--merge-supplements` 输出的新任务 JSON 保留 `inspect_path`，但 README 的“批量合并补充回答”段仍写成仅保留 `name`、`description`、`depends_on` 和 `fields`，会让用户误以为路径上下文在补充合并后丢失。 | 已修复：文档已补充 `inspect_path` 保留说明并指向 `--enrich-from-paths` 后续流程。 | a0c351e |
 | - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 16 轮要求重新读取全部 7 个范围内文件，复核第 15 轮批量路径上下文画像、补充合并和批量生成流程；除上述文档不一致外，暂未发现新的 P0/P1 缺陷。 | 无需修复 | - |
 
 #### 能力增强点（B）
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量路径建议字段回填 | 第 15 轮 `--inspect-paths` 能批量给出 `suggested_fields`，但用户仍需逐个复制到任务清单；`--merge-supplements` 只能合并人工回答，无法直接把真实代码路径扫描结果转成可继续 `--lint-fields` 或批量生成的任务 JSON。 | 在 `scripts/batch_generate.py` 新增 `--enrich-from-paths` 模式，读取任务级 `path`/`inspect_path`/`target_path` 或描述中的路径，调用 `inspect_path_context`，只为缺失的 6 要素回填 `suggested_fields`，输出保留任务名、描述、路径、依赖和合并后 `fields` 的 JSON；报告字段来源、路径错误、剩余缺失，并支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--summary-only`/`--output-file`/`--report-json` 与 `--check` 门禁。 | 待实现 | - |
+| 1 | 批量路径建议字段回填 | 第 15 轮 `--inspect-paths` 能批量给出 `suggested_fields`，但用户仍需逐个复制到任务清单；`--merge-supplements` 只能合并人工回答，无法直接把真实代码路径扫描结果转成可继续 `--lint-fields` 或批量生成的任务 JSON。 | 在 `scripts/batch_generate.py` 新增 `--enrich-from-paths` 模式，读取任务级 `path`/`inspect_path`/`target_path` 或描述中的路径，调用 `inspect_path_context`，为缺失或仅由描述启发式推断的 6 要素回填 `suggested_fields`，输出保留任务名、描述、路径、依赖和合并后 `fields` 的 JSON；报告字段来源、路径错误、剩余缺失，并支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--summary-only`/`--output-file`/`--report-json` 与 `--check` 门禁。 | 已实现 | a0c351e |
 
 #### 去重审查
 
 | 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
 | --- | --- | --- | --- |
-| 批量路径建议字段回填 | `--inspect-paths` 批量路径上下文画像 | `--inspect-paths` 只输出画像报告和建议字段；新功能把建议字段按缺失项合并回任务 JSON，产出可继续生成的清单，解决“扫描结果落回任务文件”的流程缺口。 | 通过 |
-| 批量路径建议字段回填 | `--merge-supplements` 批量补充回答合并 | `--merge-supplements` 消费用户按任务名提供的自然语言/字段补充；新功能消费本地路径扫描证据并自动回填缺失字段，输入来源、字段来源和错误条件不同。 | 通过 |
+| 批量路径建议字段回填 | `--inspect-paths` 批量路径上下文画像 | `--inspect-paths` 只输出画像报告和建议字段；新功能把建议字段按缺失项或启发式推断项合并回任务 JSON，产出可继续生成的清单，解决“扫描结果落回任务文件”的流程缺口。 | 通过 |
+| 批量路径建议字段回填 | `--merge-supplements` 批量补充回答合并 | `--merge-supplements` 消费用户按任务名提供的自然语言/字段补充；新功能消费本地路径扫描证据并自动回填缺失字段或替换启发式推断字段，输入来源、字段来源和错误条件不同。 | 通过 |
 | 批量路径建议字段回填 | `--lint-fields` / `--lint-output` 质量门禁 | 质量门禁发现字段或输出质量问题但不补齐字段；新功能在生成前主动生成缺失字段草稿并保留来源，属于清单增强而非检查报告。 | 通过 |
 
 #### 功能价值自检
 
 | 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
 | --- | --- | --- | --- | --- | --- |
-| 批量路径建议字段回填 | 多个任务已经写了目标和路径，但缺少验证、边界、约束或受阻条件，需要把真实代码上下文自动补进批量任务清单。 | 先运行 `--inspect-paths`，再逐个复制 `suggested_fields` 到 JSON/CSV，容易漏字段、覆盖人工字段或丢失路径来源。 | 一条命令生成 enriched JSON，只回填缺失要素、保留人工字段和路径来源，并用报告指出仍需用户补充的任务。 | 从“画像/检查”进入“任务清单生成前改写”，填补路径扫描结果到可生成任务文件之间的主流程缺口。 | 达标 |
+| 批量路径建议字段回填 | 多个任务已经写了目标和路径，但缺少验证、边界、约束或受阻条件，需要把真实代码上下文自动补进批量任务清单。 | 先运行 `--inspect-paths`，再逐个复制 `suggested_fields` 到 JSON/CSV，容易漏字段、覆盖人工字段或丢失路径来源。 | 一条命令生成 enriched JSON，回填缺失或替换启发式推断要素、保留人工显式字段和路径来源，并用报告指出仍需用户补充的任务。 | 从“画像/检查”进入“任务清单生成前改写”，填补路径扫描结果到可生成任务文件之间的主流程缺口。 | 达标 |
+
+### 本轮总结
+
+修复 1 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/batch_generate.py --help | grep -n "enrich-from-paths"`、有效 JSON `--enrich-from-paths --output-file --report-json`、增强后 JSON `--lint-fields` 语义复核通过、无效路径 `--enrich-from-paths --report-json` 失败退出码验证、CSV `path` 列 `--enrich-from-paths --summary-only --report-json`、`--filter`/`--limit`/`--sort-by`/`--dedupe` 组合回填、`--check --summary-only --report-json` 门禁验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
 ## 用户纠正记录
 
@@ -560,7 +564,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 15 轮，第 16 轮审查清单已创建且待修复 1 个 P1、实现能力增强；累计修复 2 个问题，新增 15 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 16 轮，下一轮将进入第 17 轮审查；累计修复 3 个问题，新增 16 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -578,4 +582,5 @@
 - 第 13 轮：批量补充回答合并（7fc61f7）
 - 第 14 轮：批量生成输出自检门禁（b8469e8）
 - 第 15 轮：批量路径上下文画像（3251992）
-剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--lint-output` 复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
+- 第 16 轮：批量路径建议字段回填（a0c351e）
+剩余风险：路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段和 `/goal` 文件语义质量检查均为启发式规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--lint-output` 复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；`--lint-goal-dir` 目前只扫描目录直属 `.txt` 文件，不递归子目录且不识别非 `.txt` 扩展名的 `/goal` 文本；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、脱敏结论和质量门禁结论。
