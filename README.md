@@ -182,6 +182,16 @@ python3 scripts/generate_goal.py --lint-goal-file goal.txt
 
 命令输出 `validation`、`extracted_fields`、`field_lint` 和 `summary`；结构无效或语义质量未通过时退出码为 1。
 
+### 检查 /goal 合集文件
+
+当批量生成使用 `--output-file all_goals.txt`，或人工把多个标准 `/goal` 分隔块整理在同一个文本文件中时，可用 `--lint-goal-bundle` 逐段检查每个 `/goal` 块，而不是只把整个文件当作一个单任务文本：
+
+```bash
+python3 scripts/generate_goal.py --lint-goal-bundle all_goals.txt
+```
+
+命令会按 `==================== /goal 指令开始 ====================` 和 `==================== /goal 指令结束 ====================` 切分，输出 `goal_count`、`passed_count`、`failed_count`、`bundle_issues`，以及每个块的 `goal_index`、`start_line`、`end_line`、可选 `task_name`、结构校验和语义质量结果；任一块未通过、没有发现完整块或分隔线不配对时退出码为 1。
+
 ### 检查 /goal 输出目录
 
 批量生成到 `--output-dir` 或人工整理多个 `/goal` 文本后，可用 `--lint-goal-dir` 一次性检查目录内所有 `.txt` 文件，避免逐个运行 `--lint-goal-file` 时漏检最终交付物：
@@ -402,6 +412,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 已有 `/goal` 文件结构校验
 - 已有 `/goal` 文件语义质量检查
+- 包含多个 `/goal` 块的合集文件逐段语义质量门禁
 - `/goal` 输出目录结构与语义质量门禁
 - `/goal` 嵌套输出目录树递归结构与语义质量门禁
 - 一键生成可复制的缺失要素追问文案

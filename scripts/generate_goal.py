@@ -624,6 +624,10 @@ def main(argv: list[str] | None = None) -> int:
             lint_report = lint_goal_file(args.lint_goal_file)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
             return 0 if lint_report["passed"] else 1
+        if args.lint_goal_bundle:
+            lint_report = lint_goal_bundle(args.lint_goal_bundle)
+            _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
+            return 0 if lint_report["passed"] else 1
         if args.lint_goal_dir:
             lint_report = lint_goal_dir(args.lint_goal_dir)
             _emit_output(json.dumps(lint_report, ensure_ascii=False, indent=2), args.output_file)
@@ -669,6 +673,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
     parser.add_argument("--validate-goal-file", help="校验已有 /goal 指令文件的分隔线、5 段结构和 6 要素提示。")
     parser.add_argument("--lint-goal-file", help="检查已有 /goal 指令文件的结构和 6 要素语义质量。")
+    parser.add_argument("--lint-goal-bundle", help="逐段检查同一文件内多个 .txt /goal 文本的结构和 6 要素语义质量。")
     parser.add_argument("--lint-goal-dir", help="批量检查目录内 .txt /goal 文件的结构和 6 要素语义质量。")
     parser.add_argument("--lint-goal-tree", help="递归检查目录树内 .txt /goal 文件的结构和 6 要素语义质量。")
     parser.add_argument("--validate-fields-json", help="校验 6 要素 JSON 是否可用于 --generate --from-json。")
@@ -725,6 +730,31 @@ def lint_goal_file(goal_file: str) -> dict[str, object]:
     """校验已有 /goal 指令文件的结构和 6 要素语义质量。"""
     goal_path = Path(goal_file)
     return lint_goal_text(goal_path.read_text(encoding="utf-8"), str(goal_path))
+
+
+def lint_goal_bundle(goal_file: str) -> dict[str, object]:
+    """逐段校验同一文本文件中的多个 /goal 指令。"""
+    goal_path = Path(goal_file)
+    if not goal_path.exists():
+        raise ValueError(f"--lint-goal-bundle 不存在：{goal_file}")
+    if not goal_path.is_file():
+        raise ValueError(f"--lint-goal-bundle 必须是文件：{goal_file}")
+    lines = goal_path.read_text(encoding="utf-8").splitlines()
+    blocks, bundle_issues = _goal_bundle_blocks(lines)
+    goal_reports = [_goal_bundle_block_report(goal_path, block) for block in blocks]
+    failed_reports = [report for report in goal_reports if not report["passed"]]
+    passed = bool(blocks) and not bundle_issues and not failed_reports
+    return {
+        "passed": passed,
+        "source": str(goal_path),
+        "goal_count": len(blocks),
+        "passed_count": len(blocks) - len(failed_reports),
+        "failed_count": len(failed_reports),
+        "bundle_issue_count": len(bundle_issues),
+        "bundle_issues": bundle_issues,
+        "goals": goal_reports,
+        "summary": _goal_bundle_lint_summary(passed, len(blocks), len(failed_reports), len(bundle_issues)),
+    }
 
 
 def lint_goal_dir(goal_dir: str) -> dict[str, object]:
@@ -803,6 +833,99 @@ def _goal_tree_files(directory: Path) -> tuple[list[Path], list[Path]]:
     )
 
 
+def _goal_bundle_blocks(lines: list[str]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    blocks: list[dict[str, object]] = []
+    issues: list[dict[str, object]] = []
+    start_line: int | None = None
+    for line_number, line in enumerate(lines, start=1):
+        stripped_line = line.strip()
+        if stripped_line == SEPARATOR_START:
+            if start_line is not None:
+                issues.append(
+                    _goal_bundle_issue(
+                        line_number,
+                        "发现新的开始分隔线，但上一个 /goal 块尚未结束",
+                        "检查是否遗漏了结束分隔线，或把嵌套/重复分隔线移除。",
+                    )
+                )
+            start_line = line_number
+            continue
+        if stripped_line != SEPARATOR_END:
+            continue
+        if start_line is None:
+            issues.append(
+                _goal_bundle_issue(
+                    line_number,
+                    "发现结束分隔线，但此前没有对应的开始分隔线",
+                    "移除多余结束分隔线，或补齐该块的开始分隔线。",
+                )
+            )
+            continue
+        blocks.append(_goal_bundle_block(lines, len(blocks) + 1, start_line, line_number))
+        start_line = None
+    if start_line is not None:
+        issues.append(
+            _goal_bundle_issue(
+                start_line,
+                "发现开始分隔线，但文件结束前没有对应的结束分隔线",
+                "补齐该 /goal 块的结束分隔线，或删除不完整块。",
+            )
+        )
+    return blocks, issues
+
+
+def _goal_bundle_issue(line: int, message: str, suggestion: str) -> dict[str, object]:
+    return {"line": line, "message": message, "suggestion": suggestion}
+
+
+def _goal_bundle_block(lines: list[str], goal_index: int, start_line: int, end_line: int) -> dict[str, object]:
+    return {
+        "goal_index": goal_index,
+        "task_name": _goal_bundle_task_name(lines, start_line),
+        "start_line": start_line,
+        "end_line": end_line,
+        "text": "\n".join(lines[start_line - 1 : end_line]),
+    }
+
+
+def _goal_bundle_task_name(lines: list[str], start_line: int) -> str:
+    search_start = start_line - 2
+    search_stop = max(-1, start_line - 8)
+    for line_index in range(search_start, search_stop, -1):
+        stripped_line = lines[line_index].strip()
+        if stripped_line.startswith("任务："):
+            return stripped_line.split("：", 1)[1].strip()
+        if stripped_line.startswith("任务:"):
+            return stripped_line.split(":", 1)[1].strip()
+        lowered_line = stripped_line.lower()
+        if lowered_line.startswith("task:"):
+            return stripped_line.split(":", 1)[1].strip()
+    return ""
+
+
+def _goal_bundle_block_report(goal_path: Path, block: dict[str, object]) -> dict[str, object]:
+    goal_index = int(block["goal_index"])
+    source = f"{goal_path}#goal-{goal_index}"
+    lint_report = lint_goal_text(str(block["text"]), source)
+    field_lint = lint_report.get("field_lint", {})
+    validation = lint_report.get("validation", {})
+    issues = field_lint.get("issues", []) if isinstance(field_lint, dict) else []
+    return {
+        "goal_index": goal_index,
+        "task_name": block.get("task_name", ""),
+        "start_line": block["start_line"],
+        "end_line": block["end_line"],
+        "passed": lint_report["passed"],
+        "validation_valid": validation.get("valid", False) if isinstance(validation, dict) else False,
+        "score": field_lint.get("score", 0) if isinstance(field_lint, dict) else 0,
+        "issue_count": field_lint.get("issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "high_issue_count": field_lint.get("high_issue_count", 0) if isinstance(field_lint, dict) else 0,
+        "missing": validation.get("missing", []) if isinstance(validation, dict) else [],
+        "issues": issues if isinstance(issues, list) else [],
+        "summary": lint_report["summary"],
+    }
+
+
 def _goal_dir_file_report(goal_file: Path) -> dict[str, object]:
     lint_report = lint_goal_text(goal_file.read_text(encoding="utf-8"), str(goal_file))
     field_lint = lint_report.get("field_lint", {})
@@ -848,6 +971,17 @@ def _goal_tree_lint_summary(passed: bool, file_count: int, failed_count: int) ->
     if passed:
         return f"/goal 目录树递归语义质量检查通过，共 {file_count} 个文件。"
     return f"/goal 目录树递归语义质量检查未通过：失败 {failed_count} 个，总计 {file_count} 个文件。"
+
+
+def _goal_bundle_lint_summary(passed: bool, goal_count: int, failed_count: int, bundle_issue_count: int) -> str:
+    if not goal_count:
+        return "合集文件内未发现完整的 /goal 分隔块。"
+    if passed:
+        return f"/goal 合集文件语义质量检查通过，共 {goal_count} 个块。"
+    return (
+        f"/goal 合集文件语义质量检查未通过：失败 {failed_count} 个，"
+        f"分隔线问题 {bundle_issue_count} 个，总计 {goal_count} 个块。"
+    )
 
 
 def lint_goal_text(goal_text: str, source: str = "") -> dict[str, object]:
