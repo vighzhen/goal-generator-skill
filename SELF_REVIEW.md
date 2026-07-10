@@ -592,6 +592,38 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（首次受 Python 缓存目录权限影响后按授权提权重跑通过）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、`python3 scripts/generate_goal.py --help | grep -n "lint-goal-tree"`、递归高质量目录 `--lint-goal-tree --output-file` 通过并断言 `relative_path` 稳定排序与跳过目录、混合目录 `--lint-goal-tree` 失败退出码与失败文件定位断言、空目录 `--lint-goal-tree` 失败退出码断言、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
+
+## 第 18 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 18 轮要求重新读取全部 7 个范围内文件，复核第 17 轮 `--lint-goal-tree`、批量 `--output-file` 拼接输出和已有 `/goal` 文件质量门禁；暂未发现新的 P0/P1 缺陷，本轮聚焦补齐“一个文件内包含多个 `/goal` 文本”时的逐段质量检查能力。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `/goal` 合集文件语义质量门禁 | 批量生成到 `--output-file` 或人工整理交付时，多个任务的 `/goal` 文本可能被拼在同一个 `.txt` 文件中；当前 `--lint-goal-file` 以单个 `/goal` 文件为对象，容易只围绕整体结构或首个概述判断，无法逐个定位合集内哪一段低质。 | 在 `scripts/generate_goal.py` 新增 `--lint-goal-bundle <文件>`，按标准开始/结束分隔线切分同一文件内的多个 `/goal` 块，逐块复用 `lint_goal_text`，输出 `goal_count`、通过/失败数量、块序号、起止行、可选任务名和语义质量问题；任一块不合格、没有发现块或分隔线不配对时退出码 1，并同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| `/goal` 合集文件语义质量门禁 | `scripts/generate_goal.py --lint-goal-file` | 单文件 lint 面向一个完整 `/goal` 文本；新功能把同一文件内多个标准分隔块拆开逐块检查，并报告块序号和行号，避免合集只检查到部分内容。 | 通过 |
+| `/goal` 合集文件语义质量门禁 | `scripts/batch_generate.py --lint-output` | `--lint-output` 只发生在本次批量生成写出前；新功能检查已经落盘、可能经过人工编辑或来自多次生成拼接的合集文件。 | 通过 |
+| `/goal` 合集文件语义质量门禁 | `--lint-goal-dir` / `--lint-goal-tree` | 目录和目录树 lint 以多个文件为单位；新功能解决多个 `/goal` 共享同一个文件时的逐段审计。 | 通过 |
+| `/goal` 合集文件语义质量门禁 | `--report-json` / 输出文件能力 | 报告和输出文件只是承载结果；新功能新增标准块切分、不配对分隔线检测和块级质量门禁，不是展示格式变化。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| `/goal` 合集文件语义质量门禁 | 批量任务用 `--output-file all_goals.txt`、人工把多个 `/goal` 合并到一个交付文档，或 CI 只收集单一文本产物时，需要确认每个任务块都可执行。 | 手工拆分文件后逐个运行 `--lint-goal-file`，或重新找到原批量输入跑 `--lint-output`；一旦文件被人工编辑，定位失败块和行号成本很高。 | 一条命令逐块检查合集文件，直接给出失败块、起止行和语义问题，可作为单文件交付物的最终质量门禁。 | 从“单文件单目标”扩展到“单文件多目标块级门禁”，覆盖目录 lint 与生成时 lint 都无法直接处理的落盘合集场景。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -600,7 +632,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 17 轮，下一轮将进入第 18 轮审查；累计修复 3 个问题，新增 17 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 18 轮审查清单已建立，正在实现 `/goal` 合集文件语义质量门禁；累计修复 3 个问题，新增 17 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
