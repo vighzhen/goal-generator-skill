@@ -70,6 +70,12 @@ python3 scripts/generate_goal.py --template bugfix
 python3 scripts/generate_goal.py --capabilities
 ```
 
+使用 `--examples` 可输出常见单任务和批量命令示例 JSON，适合新用户快速选择入口或被 IDE/脚本读取：
+
+```bash
+python3 scripts/generate_goal.py --examples
+```
+
 ### 生成一次性追问文案
 
 使用 `--questions` 可把缺失要素分析结果转成可直接发给需求方的中文追问文本：
@@ -270,6 +276,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 任务类型画像与 6 要素模板推荐
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
 - 机器可读能力清单输出
+- 机器可读命令示例清单
 - 已有 `/goal` 文件结构校验
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件

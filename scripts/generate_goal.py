@@ -338,6 +338,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.capabilities:
             _emit_output(json.dumps(build_capabilities(), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.examples:
+            _emit_output(json.dumps(build_usage_examples(), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.template:
             _emit_output(json.dumps(get_task_template(args.template), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -372,6 +375,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
     parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
+    parser.add_argument("--examples", action="store_true", help="输出常见单任务和批量命令示例 JSON。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
@@ -416,6 +420,7 @@ def build_capabilities() -> dict[str, object]:
                 "--list-templates",
                 "--template",
                 "--capabilities",
+                "--examples",
                 "--validate-goal-file",
                 "--generate",
                 "--interactive",
@@ -452,6 +457,56 @@ def build_capabilities() -> dict[str, object]:
             "不引入第三方依赖",
             "保持 /goal 五段式结构和分隔线格式",
             "批量任务失败时跳过并继续处理其他任务",
+        ],
+    }
+
+
+def build_usage_examples() -> dict[str, object]:
+    """输出常见使用场景对应的命令示例。"""
+    return {
+        "single_task": [
+            {
+                "name": "分析一句话需求",
+                "scenario": "用户只给出粗略编码任务，需要先确认缺哪些 6 要素。",
+                "command": "python3 scripts/generate_goal.py --analyze '给项目加单元测试'",
+            },
+            {
+                "name": "生成任务画像",
+                "scenario": "追问前先判断任务类型、复杂度、风险和推荐填写方向。",
+                "command": "python3 scripts/generate_goal.py --profile '修复登录 API 在空 token 场景下偶发 500 的问题'",
+            },
+            {
+                "name": "从 JSON 生成 /goal",
+                "scenario": "自动化系统已保存 6 要素，希望避免展开多个 CLI 参数。",
+                "command": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
+            },
+            {
+                "name": "校验已有 /goal 文件",
+                "scenario": "手工编辑或批量拼接后，需要确认分隔线、5 段结构和 6 要素提示仍完整。",
+                "command": "python3 scripts/generate_goal.py --validate-goal-file goal.txt",
+            },
+        ],
+        "batch": [
+            {
+                "name": "批量 dry-run",
+                "scenario": "从任务清单检查每个任务的要素完整度，不生成 /goal。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run",
+            },
+            {
+                "name": "CI 校验清单",
+                "scenario": "交付前阻止缺失要素任务进入执行阶段。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --check --report-json batch_report.json",
+            },
+            {
+                "name": "预览任务范围",
+                "scenario": "配置 filter/sort/limit 后先确认将处理哪些任务。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --list-tasks --filter '测试|Bug' --sort-by name",
+            },
+            {
+                "name": "批量风险摘要",
+                "scenario": "团队评审时快速查看任务类型、风险等级和缺失要素。",
+                "command": "python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-summary --sort-by name",
+            },
         ],
     }
 
