@@ -183,8 +183,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_redaction_report_mode(tasks, args)
     if args.questions_md:
         return _run_questions_markdown_mode(tasks, args)
-    if args.risk_report_md:
-        return _run_risk_report_mode(tasks, args)
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
@@ -252,7 +250,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
-    parser.add_argument("--risk-report-md", help="把批量任务风险等级、风险因素和缓解建议写入 Markdown 报告。")
     parser.add_argument("--questions-md", help="把每个任务可直接发送给需求方的缺失要素追问写入 Markdown 包。")
     parser.add_argument("--redaction-report-md", help="把批量任务中的敏感信息发现、脱敏预览和处理建议写入 Markdown 报告。")
     parser.add_argument("--draft-jsonl", help="把每个任务的 Goal JSON 草稿写入单个 JSONL 文件，适合流水线逐行消费。")
@@ -437,23 +434,6 @@ def _run_questions_markdown_mode(tasks: list[TaskSpec], args: argparse.Namespace
         _write_question_pack_report(question_packs, skipped_tasks, stats, Path(args.report_json))
     if not args.summary_only:
         print(f"已写入追问 Markdown 包：{questions_path}")
-    print(_format_summary(stats))
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    return 0
-
-
-def _run_risk_report_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    start_time = time.perf_counter()
-    profiled_tasks, skipped_tasks = _build_profile_summaries(tasks, args.dedupe)
-    stats = BatchStats(len(profiled_tasks), len(skipped_tasks), time.perf_counter() - start_time)
-    report_path = Path(args.risk_report_md)
-    _write_risk_report_markdown(profiled_tasks, skipped_tasks, stats, report_path)
-    if args.report_json:
-        _write_profile_summary_report(profiled_tasks, skipped_tasks, stats, Path(args.report_json))
-    if not args.summary_only:
-        print(f"已写入风险报告：{report_path}")
     print(_format_summary(stats))
     fail_on_skipped = args.fail_on_skipped or args.check
     if fail_on_skipped and stats.skipped_count:
@@ -1782,32 +1762,6 @@ def _write_questions_markdown(
     questions_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
-def _write_risk_report_markdown(
-    profiled_tasks: list[TaskProfileSummary],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    sorted_tasks = sorted(profiled_tasks, key=lambda item: _profile_int(item.profile, "risk_score"), reverse=True)
-    high_risk_count = sum(1 for task in profiled_tasks if task.profile.get("risk_level") == "high")
-    lines = [
-        "# Batch Goal Risk Report",
-        "",
-        f"- 可评审任务：{stats.success_count}",
-        f"- 高风险任务：{high_risk_count}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-        "## 风险明细",
-        "",
-    ]
-    lines.extend(_risk_report_table(sorted_tasks))
-    lines.extend(["", "## 跳过任务", ""])
-    lines.extend(_markdown_skipped_table(skipped_tasks))
-    report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-
 def _write_redaction_report_markdown(
     redaction_summaries: list[TaskRedactionSummary],
     skipped_tasks: list[SkippedTask],
@@ -1870,66 +1824,6 @@ def _redaction_types_cell(check: dict[str, object]) -> str:
     types = check.get("finding_types", [])
     type_values = [str(item) for item in types] if isinstance(types, list) else []
     return ",".join(type_values) if type_values else "无"
-
-
-def _risk_report_table(profiled_tasks: list[TaskProfileSummary]) -> list[str]:
-    if not profiled_tasks:
-        return ["无可评审任务。"]
-    lines = [
-        "| 任务 | 类型 | 风险 | 复杂度 | 缺失要素 | 风险因素 | 缓解动作 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for profiled_task in profiled_tasks:
-        profile = profiled_task.profile
-        task_type = profile.get("task_type", {})
-        complexity = profile.get("complexity", {})
-        task_label = task_type.get("label", "未知") if isinstance(task_type, dict) else "未知"
-        complexity_level = complexity.get("level", "unknown") if isinstance(complexity, dict) else "unknown"
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(profiled_task.task.name),
-                    _markdown_cell(str(task_label)),
-                    _markdown_cell(_profile_risk_cell(profile)),
-                    _markdown_cell(str(complexity_level)),
-                    _markdown_cell(_profile_missing_labels(profile)),
-                    _markdown_cell(_profile_risk_factors(profile)),
-                    _markdown_cell(_profile_mitigation_action(profile)),
-                ]
-            )
-            + " |"
-        )
-    return lines
-
-
-def _profile_int(profile: dict[str, object], key: str) -> int:
-    value = profile.get(key, 0)
-    return value if isinstance(value, int) else 0
-
-
-def _profile_missing_keys(profile: dict[str, object]) -> list[str]:
-    missing = profile.get("missing", [])
-    return [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
-
-
-def _profile_missing_labels(profile: dict[str, object]) -> str:
-    return _format_labels(_profile_missing_keys(profile))
-
-
-def _profile_risk_factors(profile: dict[str, object]) -> str:
-    factors = profile.get("risk_factors", [])
-    factor_values = [str(factor) for factor in factors] if isinstance(factors, list) else []
-    return "\n".join(factor_values) if factor_values else "未发现明显高风险信号"
-
-
-def _profile_mitigation_action(profile: dict[str, object]) -> str:
-    missing_keys = _profile_missing_keys(profile)
-    if missing_keys:
-        return f"优先补齐：{_format_labels(missing_keys)}"
-    if profile.get("risk_level") == "high":
-        return "先复核迁移、兼容、回滚和验证面后再生成 /goal"
-    return "可进入生成前复核边界、验证命令和受阻条件"
 
 
 def _question_pack_markdown_section(index: int, question_pack: TaskQuestionPack) -> list[str]:
