@@ -308,6 +308,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、高质量 `/goal` 文件 `--lint-goal-file` 通过断言、空泛但结构完整 `/goal` 文件 `--lint-goal-file` 失败退出码与报告断言、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端验证。
 
+## 第 10 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 10 轮要求重新通读全部 7 个范围内文件及前 9 轮新增功能；暂未发现新的 P0/P1 缺陷，本轮聚焦让批量生成真正按任务依赖顺序输出。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量依赖顺序生成 | 第 2 轮已能用 `--plan-dependencies` 查看依赖波次，但实际批量生成或 dry-run 仍只能按输入顺序或名称排序输出；用户需要手工根据计划重排任务文件，容易把后置任务先交给执行者。 | 在 `scripts/batch_generate.py` 新增 `--dependency-order`，复用依赖计划的拓扑排序，在生成、dry-run、lint、redaction、list 等模式前按依赖波次重排任务；依赖缺失、重复或循环时直接失败并提示问题；同步更新 README 和 SKILL。 | 待实现 | 待回填 |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量依赖顺序生成 | `--plan-dependencies` | `--plan-dependencies` 只输出计划不生成 `/goal`；新功能把依赖计划应用到实际生成和检查流程，减少手工重排。 | 通过 |
+| 批量依赖顺序生成 | `--sort-by input/name` | 现有排序只按平铺字段排序；新功能遵守任务依赖图，发现无效依赖并按波次拓扑排序，排序依据和风险检查不同。 | 通过 |
+| 批量依赖顺序生成 | `--filter`/`--limit` | 这些选项控制任务子集；新功能控制子集内的依赖执行顺序，并在子集导致依赖缺失时失败提示。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量依赖顺序生成 | 批量任务含前后置依赖，需要生成或 dry-run 的输出顺序直接可交给执行者。 | 先运行 `--plan-dependencies`，再手工修改 JSON/CSV 输入顺序或按计划逐批复制输出。 | 一条命令在生成前应用依赖拓扑排序，输出顺序与依赖一致，依赖错误即时失败。 | 从“依赖分析报告”升级到“依赖驱动执行输出”，属于批量核心流程能力增强。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 10 轮审查清单，计划实现 1 个批量依赖顺序生成功能。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -316,7 +350,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 9 轮，准备进入第 10 轮；累计修复 2 个问题，新增 9 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，当前处于第 10 轮；累计修复 2 个问题，新增 9 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
