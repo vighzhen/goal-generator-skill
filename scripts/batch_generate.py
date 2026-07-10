@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
         return 1
-    if args.score_summary:
+    if args.score_summary or args.score_report_md:
         return _run_score_summary_mode(tasks, args)
     if args.profile_summary:
         return _run_profile_summary_mode(tasks, args)
@@ -195,6 +195,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
+    parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -313,6 +314,8 @@ def _run_score_summary_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> 
     stats = BatchStats(len(scored_tasks), len(skipped_tasks), time.perf_counter() - start_time)
     if args.report_json:
         _write_score_summary_report(scored_tasks, skipped_tasks, stats, Path(args.report_json))
+    if args.score_report_md:
+        _write_score_report_markdown(scored_tasks, skipped_tasks, stats, Path(args.score_report_md))
     print(_format_summary(stats))
     fail_on_skipped = args.fail_on_skipped or args.check
     if fail_on_skipped and stats.skipped_count:
@@ -1169,6 +1172,61 @@ def _write_score_summary_report(
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_score_report_markdown(
+    scored_tasks: list[TaskScoreSummary],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Batch Readiness Score Report",
+        "",
+        f"- 成功任务：{stats.success_count}",
+        f"- 跳过任务：{stats.skipped_count}",
+        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
+        "",
+        "## 评分摘要",
+        "",
+    ]
+    lines.extend(_markdown_score_table(scored_tasks))
+    lines.extend(["", "## 跳过任务", ""])
+    lines.extend(_markdown_skipped_table(skipped_tasks))
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _markdown_score_table(scored_tasks: list[TaskScoreSummary]) -> list[str]:
+    if not scored_tasks:
+        return ["无可评分任务。"]
+    lines = [
+        "| 任务 | 分数 | 等级 | 风险 | 缺失要素 | 下一步建议 |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for scored_task in scored_tasks:
+        score = scored_task.score
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(scored_task.task.name),
+                    _markdown_cell(str(score.get("readiness_score", ""))),
+                    _markdown_cell(str(score.get("readiness_level", "unknown"))),
+                    _markdown_cell(f"{score.get('risk_level', 'unknown')}({score.get('risk_score', '')})"),
+                    _markdown_cell(_score_missing_labels(score)),
+                    _markdown_cell(str(score.get("next_action", ""))),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def _score_missing_labels(score: dict[str, object]) -> str:
+    missing = score.get("missing", [])
+    missing_keys = [key for key in missing if isinstance(key, str) and key in ELEMENT_ORDER] if isinstance(missing, list) else []
+    return _format_labels(missing_keys)
 
 
 def _task_list_report(task: TaskSpec, include_profile: bool = False) -> dict[str, object]:
