@@ -414,6 +414,7 @@ def build_capabilities() -> dict[str, object]:
                 "--filter",
                 "--sort-by",
                 "--limit",
+                "--list-tasks",
                 "--dedupe",
                 "--check",
                 "--strict",

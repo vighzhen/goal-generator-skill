@@ -115,6 +115,12 @@ def main(argv: list[str] | None = None) -> int:
         tasks = _filter_tasks(tasks, args.filter)
         tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"读取输入失败：{error}", file=sys.stderr)
+        return 1
+    if args.list_tasks:
+        return _run_list_tasks_mode(tasks, args)
+    try:
         default_values = _load_default_values(args.defaults_json)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"读取输入失败：{error}", file=sys.stderr)
@@ -148,6 +154,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
+    parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--dedupe", action="store_true", help="按任务名和描述跳过重复任务。")
     parser.add_argument("--fail-on-skipped", action="store_true", help="有跳过任务时以退出码 1 结束，适合 CI 门禁。")
     parser.add_argument("--summary-only", action="store_true", help="抑制任务正文 stdout，仅输出最终摘要。")
@@ -208,6 +215,37 @@ def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
     if limit < 1:
         raise ValueError("--limit 必须是大于 0 的整数")
     return tasks[:limit]
+
+
+def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
+    start_time = time.perf_counter()
+    listed_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
+    summary_only = args.summary_only or args.check
+    if not summary_only:
+        print("\n".join(f"{index}. {task.name}" for index, task in enumerate(listed_tasks, start=1)))
+    stats = BatchStats(len(listed_tasks), len(skipped_tasks), time.perf_counter() - start_time)
+    if args.report_json:
+        _write_task_list_report(listed_tasks, skipped_tasks, stats, Path(args.report_json))
+    print(_format_summary(stats))
+    fail_on_skipped = args.fail_on_skipped or args.check
+    if fail_on_skipped and stats.skipped_count:
+        return 1
+    return 0
+
+
+def _dedupe_preview_tasks(tasks: list[TaskSpec], dedupe: bool) -> tuple[list[TaskSpec], list[SkippedTask]]:
+    if not dedupe:
+        return tasks, []
+    listed_tasks: list[TaskSpec] = []
+    skipped_tasks: list[SkippedTask] = []
+    seen_task_keys: set[str] = set()
+    for task in tasks:
+        if _is_duplicate_task(task, seen_task_keys):
+            reason = "重复任务：任务名和描述已出现过"
+            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
+            continue
+        listed_tasks.append(task)
+    return listed_tasks, skipped_tasks
 
 
 def _load_default_values(defaults_json: str | None) -> dict[str, str]:
@@ -726,6 +764,23 @@ def _write_report_json(
         "skipped_count": stats.skipped_count,
         "elapsed_seconds": round(stats.elapsed_seconds, 4),
         "tasks": [_task_report(output, output_dir, output_file) for output in outputs],
+        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_task_list_report(
+    tasks: list[TaskSpec],
+    skipped_tasks: list[SkippedTask],
+    stats: BatchStats,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": stats.success_count,
+        "skipped_count": stats.skipped_count,
+        "elapsed_seconds": round(stats.elapsed_seconds, 4),
+        "tasks": [{"name": task.name, "description": task.description} for task in tasks],
         "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
