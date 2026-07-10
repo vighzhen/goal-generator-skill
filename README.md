@@ -278,6 +278,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json
 # 从 JSON 批量生成前检查最终 /goal 文本质量，任一输出不合格则失败且不写出交付物
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-output --report-json output_lint_report.json
 
+# 批量最终输出最低分门禁：任一生成结果低于 95 分则失败且不写出交付物
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-output --min-lint-score 95 --report-json output_lint_report.json
+
 # 批量生成前查看任务类型、复杂度、风险和 6 要素缺口组合画像
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --profile-tasks --report-json task_profile.json
 
@@ -313,6 +316,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --check --r
 
 # 批量检查任务 6 要素字段语义质量，适合生成前或 CI 门禁
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-fields --report-json fields_lint.json
+
+# 批量字段最低分门禁：任一任务低于 95 分时返回非零退出码
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-fields --min-lint-score 95 --report-json fields_lint.json
 
 # 批量审计任务名称、描述和字段中的 token、邮箱、URL 等敏感信息
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --redaction-check --report-json redaction_report.json
@@ -380,8 +386,8 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--merge-supplements <path>` 不生成 `/goal` 正文，而是读取按任务名组织的补充回答 JSON/CSV，把补充文本、显式 6 要素字段和原任务的 `description`/`fields` 合并为新的任务 JSON；可配合 `--output-file` 保存合并清单，配合 `--report-json` 查看字段来源、未匹配补充和剩余缺口，配合 `--check` 在仍缺要素、输入错误或补充任务名未匹配时失败退出。
 - `--inspect-paths` 不生成 `/goal` 正文，而是批量复用单任务 `--inspect-path` 的代码事实采集能力；支持 `--filter`、`--limit`、`--sort-by`、`--dedupe`、`--summary-only`、`--output-file` 和 `--report-json`，适合在批量生成前统一补齐边界、验证命令和风险线索。
 - `--enrich-from-paths` 不生成 `/goal` 正文，而是扫描任务路径并输出增强后的任务 JSON；它保留 `name`、`description`、`inspect_path`、`depends_on` 和用户已有 `fields`，只为缺失或仅由描述启发式推断的要素写入路径画像建议，并在 `--report-json` 的 `path_enrichment` 中记录字段来源、路径错误、剩余缺失和可生成状态。
-- `--lint-output` 只用于真实生成模式，不与 `--dry-run` 或 `--check` 同用；它会在写出 stdout/`--output-file`/`--output-dir` 交付物前逐任务检查最终 `/goal` 文本的结构和语义质量，任一输出未通过时退出码为 1，并把 `output_lint` 写入 `--report-json`。
-- `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。
+- `--lint-output` 只用于真实生成模式，不与 `--dry-run` 或 `--check` 同用；它会在写出 stdout/`--output-file`/`--output-dir` 交付物前逐任务检查最终 `/goal` 文本的结构和语义质量，任一输出未通过时退出码为 1，并把 `output_lint` 写入 `--report-json`。可追加 `--min-lint-score <0-100>`，让任一最终输出低于最低分时失败，并在任务报告中输出 `score_gate`。
+- `--lint-fields` 不生成 `/goal` 正文，而是逐个任务检查 6 要素字段的具体性、验证命令、边界、提交节奏和受阻条件；任一任务未通过时退出码为 1，可配合 `--report-json` 做批量质量门禁。可追加 `--min-lint-score <0-100>`，对每个任务字段得分执行最低分门禁并重算批量通过/失败计数。
 - `--redaction-check` 不生成 `/goal` 正文，而是逐个任务审计名称、描述和 6 要素字段值中的 token、密钥、邮箱、URL 等敏感片段；发现风险时退出码为 1，并在报告中提供脱敏预览。
 - `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
 - `--dependency-order` 会在生成、dry-run、list、lint 或 redaction 前应用依赖拓扑顺序；如果筛选/limit 后导致依赖缺失、循环或重复任务名，会直接失败并提示先运行 `--plan-dependencies` 查看详情。

@@ -113,21 +113,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     start_time = time.perf_counter()
-    if args.fail_on_high_risk and not args.profile_tasks:
-        print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
-        return 1
-    if args.fail_on_risk_level and not args.profile_tasks:
-        print("--fail-on-risk-level 仅适用于 --profile-tasks。", file=sys.stderr)
-        return 1
-    if args.lint_defaults_json:
-        if args.lint_output:
-            print("--lint-defaults-json 不生成 /goal，请勿与 --lint-output 同用。", file=sys.stderr)
+    try:
+        min_lint_score = _min_lint_score_from_args(args)
+        if args.fail_on_high_risk and not args.profile_tasks:
+            print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
-        try:
-            return _run_lint_defaults_mode(args, start_time)
-        except (OSError, ValueError, json.JSONDecodeError) as error:
-            print(f"读取输入失败：{error}", file=sys.stderr)
+        if args.fail_on_risk_level and not args.profile_tasks:
+            print("--fail-on-risk-level 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
+        if args.lint_defaults_json:
+            if args.lint_output:
+                print("--lint-defaults-json 不生成 /goal，请勿与 --lint-output 同用。", file=sys.stderr)
+                return 1
+            if min_lint_score is not None:
+                print("--min-lint-score 仅适用于 --lint-fields 或 --lint-output。", file=sys.stderr)
+                return 1
+            try:
+                return _run_lint_defaults_mode(args, start_time)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                print(f"读取输入失败：{error}", file=sys.stderr)
+                return 1
+    except ValueError as error:
+        print(f"参数错误：{error}", file=sys.stderr)
+        return 1
     try:
         tasks = _load_tasks_from_input(_input_value_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
@@ -166,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.redaction_check:
         return _run_batch_redaction_check_mode(tasks, args, start_time)
     if args.lint_fields:
-        return _run_lint_fields_mode(tasks, args, start_time)
+        return _run_lint_fields_mode(tasks, args, start_time, min_lint_score)
     if args.inspect_paths:
         return _run_inspect_paths_mode(tasks, args, start_time)
     if args.enrich_from_paths:
@@ -190,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         if dry_run:
             print("--lint-output 需要真实生成 /goal，请勿与 --dry-run 或 --check 同用。", file=sys.stderr)
             return 1
-        output_lint_report = _build_output_lint_report(outputs)
+        output_lint_report = _build_output_lint_report(outputs, min_lint_score)
         if not output_lint_report["passed"]:
             elapsed_seconds = time.perf_counter() - start_time
             failed_count = int(output_lint_report["failed_count"])
@@ -262,6 +270,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--merge-supplements", help="读取按任务名组织的补充回答 JSON/CSV，合并回批量任务 fields 并输出新的任务 JSON。")
     parser.add_argument("--dry-run", action="store_true", help="只分析要素完整度，不生成指令。")
     parser.add_argument("--lint-output", action="store_true", help="真实生成 /goal 后，在写出交付物前检查每个最终文本的结构和语义质量。")
+    parser.add_argument(
+        "--min-lint-score",
+        type=int,
+        help="配合 --lint-fields 或 --lint-output，任务得分低于该阈值时失败（0-100）。",
+    )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--inspect-paths", action="store_true", help="批量扫描任务 path/inspect_path/target_path 指向的本地路径并输出上下文建议。")
@@ -277,6 +290,17 @@ def _input_value_from_args(args: argparse.Namespace) -> str:
     if not input_value:
         raise ValueError("必须提供 --input 或位置输入文件路径")
     return input_value
+
+
+def _min_lint_score_from_args(args: argparse.Namespace) -> int | None:
+    min_lint_score = args.min_lint_score
+    if min_lint_score is None:
+        return None
+    if min_lint_score < 0 or min_lint_score > 100:
+        raise ValueError("--min-lint-score 必须是 0 到 100 之间的整数")
+    if not (args.lint_fields or args.lint_output):
+        raise ValueError("--min-lint-score 仅适用于 --lint-fields 或 --lint-output")
+    return min_lint_score
 
 
 def _load_tasks_from_input(input_value: str) -> list[TaskSpec]:
@@ -1396,9 +1420,14 @@ def _format_redaction_summary(redaction_report: dict[str, object], skipped_count
     )
 
 
-def _run_lint_fields_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
+def _run_lint_fields_mode(
+    tasks: list[TaskSpec],
+    args: argparse.Namespace,
+    start_time: float,
+    min_lint_score: int | None = None,
+) -> int:
     lint_tasks, skipped_tasks = _dedupe_preview_tasks(tasks, args.dedupe)
-    lint_report = _build_batch_field_lint_report(lint_tasks)
+    lint_report = _build_batch_field_lint_report(lint_tasks, min_lint_score)
     summary_only = args.summary_only or args.check
     if not summary_only:
         print(_format_batch_field_lint_report(lint_report))
@@ -1416,14 +1445,15 @@ def _run_lint_fields_mode(tasks: list[TaskSpec], args: argparse.Namespace, start
     return 0
 
 
-def _build_batch_field_lint_report(tasks: list[TaskSpec]) -> dict[str, object]:
-    task_reports = [_task_field_lint_report(task) for task in tasks]
+def _build_batch_field_lint_report(tasks: list[TaskSpec], min_lint_score: int | None = None) -> dict[str, object]:
+    task_reports = [_apply_task_min_lint_score(_task_field_lint_report(task), min_lint_score) for task in tasks]
     failed_count = sum(1 for report in task_reports if not report["passed"])
     return {
         "valid": failed_count == 0,
         "task_count": len(task_reports),
         "passed_count": len(task_reports) - failed_count,
         "failed_count": failed_count,
+        "score_gate": _batch_score_gate(task_reports, min_lint_score),
         "tasks": task_reports,
     }
 
@@ -1469,6 +1499,81 @@ def _failed_task_field_lint_report(task_name: str, description: str, reason: str
         ],
         "summary": f"任务输入无效：{reason}",
     }
+
+
+def _apply_task_min_lint_score(task_report: dict[str, object], min_lint_score: int | None) -> dict[str, object]:
+    if min_lint_score is None:
+        return task_report
+    score = int(task_report.get("score", 0))
+    score_gate = _task_score_gate(score, min_lint_score)
+    gated_report = dict(task_report)
+    gated_report["score_gate"] = score_gate
+    if not score_gate["passed"]:
+        gated_report["passed"] = False
+    gated_report["summary"] = _append_score_gate_summary(str(task_report.get("summary", "")), score_gate)
+    return gated_report
+
+
+def _task_score_gate(score: int, min_lint_score: int) -> dict[str, object]:
+    passed = score >= min_lint_score
+    return {
+        "enabled": True,
+        "min_score": min_lint_score,
+        "score": score,
+        "passed": passed,
+        "summary": _task_score_gate_summary(score, min_lint_score, passed),
+    }
+
+
+def _task_score_gate_summary(score: int, min_lint_score: int, passed: bool) -> str:
+    if passed:
+        return f"最低分门禁通过：得分 {score}，要求至少 {min_lint_score}。"
+    return f"最低分门禁未通过：得分 {score}，要求至少 {min_lint_score}。"
+
+
+def _append_score_gate_summary(summary: str, score_gate: dict[str, object]) -> str:
+    gate_summary = str(score_gate.get("summary", ""))
+    if not summary:
+        return gate_summary
+    return f"{summary} {gate_summary}"
+
+
+def _batch_score_gate(task_reports: list[dict[str, object]], min_lint_score: int | None) -> dict[str, object]:
+    if min_lint_score is None:
+        return {
+            "enabled": False,
+            "min_score": None,
+            "failed_count": 0,
+            "failed_tasks": [],
+            "passed": True,
+            "summary": "未启用最低分门禁。",
+        }
+    failed_tasks = [
+        {"name": str(report.get("name", "未知任务")), "score": int(report.get("score", 0))}
+        for report in task_reports
+        if not _task_score_gate_passed(report)
+    ]
+    return {
+        "enabled": True,
+        "min_score": min_lint_score,
+        "failed_count": len(failed_tasks),
+        "failed_tasks": failed_tasks,
+        "passed": not failed_tasks,
+        "summary": _batch_score_gate_summary(min_lint_score, len(failed_tasks)),
+    }
+
+
+def _task_score_gate_passed(task_report: dict[str, object]) -> bool:
+    score_gate = task_report.get("score_gate", {})
+    if not isinstance(score_gate, dict) or not score_gate.get("enabled"):
+        return True
+    return bool(score_gate.get("passed", True))
+
+
+def _batch_score_gate_summary(min_lint_score: int, failed_count: int) -> str:
+    if failed_count:
+        return f"最低分门禁未通过：{failed_count} 个任务低于 {min_lint_score} 分。"
+    return f"最低分门禁通过：所有任务均达到 {min_lint_score} 分。"
 
 
 def _task_lint_field_values(task: TaskSpec) -> tuple[dict[str, str], dict[str, str]]:
@@ -1524,6 +1629,9 @@ def _format_task_field_lint_lines(task_report: dict[str, object]) -> list[str]:
     ]
     if task_report.get("passed"):
         return lines
+    score_gate = task_report.get("score_gate", {})
+    if isinstance(score_gate, dict) and score_gate.get("enabled") and not score_gate.get("passed", True):
+        lines.append(f"  - {score_gate.get('summary', '最低分门禁未通过')}")
     issues = task_report.get("issues", [])
     if not isinstance(issues, list):
         return lines
@@ -1540,10 +1648,17 @@ def _format_task_field_lint_lines(task_report: dict[str, object]) -> list[str]:
 
 
 def _format_lint_fields_summary(lint_report: dict[str, object], skipped_count: int, elapsed_seconds: float) -> str:
+    score_gate = lint_report.get("score_gate", {})
+    score_gate_text = ""
+    if isinstance(score_gate, dict) and score_gate.get("enabled"):
+        score_gate_text = (
+            f"最低分门禁命中 {score_gate.get('failed_count', 0)} 个，"
+        )
     return (
         "字段语义质量检查完成："
         f"通过 {lint_report.get('passed_count', 0)} 个，"
         f"失败 {lint_report.get('failed_count', 0)} 个，"
+        f"{score_gate_text}"
         f"跳过 {skipped_count} 个，总耗时 {elapsed_seconds:.2f} 秒。"
     )
 
@@ -1922,14 +2037,15 @@ def _format_path_enrichment_summary(enrichment_report: dict[str, object], skippe
     )
 
 
-def _build_output_lint_report(outputs: list[TaskOutput]) -> dict[str, object]:
-    task_reports = [_output_lint_task_report(output) for output in outputs]
+def _build_output_lint_report(outputs: list[TaskOutput], min_lint_score: int | None = None) -> dict[str, object]:
+    task_reports = [_apply_task_min_lint_score(_output_lint_task_report(output), min_lint_score) for output in outputs]
     failed_count = sum(1 for report in task_reports if not report["passed"])
     return {
         "passed": failed_count == 0,
         "task_count": len(task_reports),
         "passed_count": len(task_reports) - failed_count,
         "failed_count": failed_count,
+        "score_gate": _batch_score_gate(task_reports, min_lint_score),
         "tasks": task_reports,
     }
 
@@ -1976,6 +2092,9 @@ def _format_output_lint_task_lines(task_report: dict[str, object]) -> list[str]:
     ]
     if task_report.get("passed"):
         return lines
+    score_gate = task_report.get("score_gate", {})
+    if isinstance(score_gate, dict) and score_gate.get("enabled") and not score_gate.get("passed", True):
+        lines.append(f"  - {score_gate.get('summary', '最低分门禁未通过')}")
     issues = task_report.get("issues", [])
     if isinstance(issues, list):
         for issue in issues[:3]:
@@ -1994,9 +2113,14 @@ def _format_output_lint_task_lines(task_report: dict[str, object]) -> list[str]:
 
 
 def _format_lint_output_summary(lint_report: dict[str, object]) -> str:
+    score_gate = lint_report.get("score_gate", {})
+    score_gate_text = ""
+    if isinstance(score_gate, dict) and score_gate.get("enabled"):
+        score_gate_text = f"最低分门禁命中 {score_gate.get('failed_count', 0)} 个，"
     return (
         "输出 /goal 自检完成："
         f"通过 {lint_report.get('passed_count', 0)} 个，"
+        f"{score_gate_text}"
         f"失败 {lint_report.get('failed_count', 0)} 个。"
     )
 
