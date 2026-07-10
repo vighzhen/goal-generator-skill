@@ -11,7 +11,7 @@
 
 提交规则：
 - 每完成一个独立改动后，先执行 {LOCAL_VERIFICATION_COMMAND}，再执行 `git add` 和 `git commit`。
-- Commit message 使用 `{COMMIT_MESSAGE_FORMAT}` 格式。
+- Commit message 使用 `{COMMIT_MESSAGE_FORMAT}` 格式，推荐为 `<type>(<scope>): <改动类型> - <简要说明>`，其中 `<scope>` 使用业务维度名。
 - 示例：`{COMMIT_EXAMPLE_1}`；`{COMMIT_EXAMPLE_2}`；`{COMMIT_EXAMPLE_3}`。
 - 预期提交数量为 {EXPECTED_COMMIT_RANGE}；如果实际偏离，必须在最终回复解释原因。
 - 全部完成并通过最终验证后执行 `git checkout main && git merge {BRANCH_NAME}`。

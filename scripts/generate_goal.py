@@ -123,6 +123,16 @@ NEGATION_PREFIXES: tuple[str, ...] = ("非", "不", "没有", "无需", "无")
 TEST_TOOL_KEYWORDS: tuple[str, ...] = ("pytest", "unittest")
 REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "README", "说明", "审计")
 DETAIL_KEYWORDS: tuple[str, ...] = ("维度", "规则", "类别", "批量", "重构", "优化", "迁移")
+COMMIT_SCOPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("错误处理", ("错误处理", "异常", "错误码", "失败路径")),
+    ("类型注解", ("类型注解", "类型检查", "typing", "mypy")),
+    ("结构设计", ("结构设计", "结构", "拆分", "长函数", "架构")),
+    ("代码质量", ("代码质量", "质量", "优化", "坏味道")),
+    ("接口", ("接口", "api")),
+    ("文档", ("文档", "报告", "readme")),
+    ("数据迁移", ("迁移", "升级")),
+)
+DEFAULT_PATH_HINT = "对应文件"
 PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 NUMBER_PATTERN = re.compile(r"\d+")
 BRANCH_PATTERN = re.compile(r"(?:分支|branch)\s*[`'\"]?([A-Za-z0-9._/-]+)")
@@ -372,12 +382,14 @@ def _blocked_rule(blocked: str) -> str:
 
 def _build_commit_section(goal: _GoalFields, branch_name: str) -> str:
     commit_range = _expected_commit_range(goal.iteration)
+    commit_scope = _infer_commit_scope(goal.outcome)
     examples = _commit_examples(goal.outcome)
     lines = [
         "提交规则：",
         f"- 预期提交数量为 {commit_range}；如果实际偏离，必须在最终回复解释原因。",
         "- 每个独立改动完成后立即运行对应验证，再执行 `git add` 和 `git commit`。",
-        "- Commit message 使用 `<type>(goal): <简短说明>` 格式。",
+        "- Commit message 使用 `<type>(<scope>): <改动类型> - <简要说明>` 格式。",
+        f"- `<scope>` 优先使用业务维度名；当前建议 scope 为 `{commit_scope}`。",
         f"- 示例：`{examples[0]}`；`{examples[1]}`；`{examples[2]}`。",
         f"- 全部完成并验证通过后执行 `git checkout main && git merge {branch_name}`。",
         "- 合并完成后执行 `git push -u origin main`；如果用户明确要求不推送，则记录跳过原因。",
@@ -395,10 +407,12 @@ def _expected_commit_range(iteration: str) -> str:
 def _commit_examples(outcome: str) -> list[str]:
     commit_type = _infer_commit_type(outcome)
     scope = _infer_commit_scope(outcome)
+    path_hint = _extract_path_hint(outcome)
+    change_type = _commit_change_type(outcome)
     return [
-        f"{commit_type}({scope}): 完成首个独立改动",
-        f"{commit_type}({scope}): 完成下一组范围内改动",
-        f"chore({scope}): 补充最终验证记录",
+        f"{commit_type}({scope}): {change_type} - {path_hint}",
+        f"{commit_type}({scope}): 完成下一项独立改动 - {path_hint}",
+        f"chore({scope}): 补充最终验证记录 - {path_hint}",
     ]
 
 
@@ -416,15 +430,46 @@ def _infer_commit_type(outcome: str) -> str:
 
 
 def _infer_commit_scope(outcome: str) -> str:
-    if "api" in outcome.lower() or "接口" in outcome:
-        return "api"
+    lowered_text = outcome.lower()
     if _mentions_test_task(outcome):
-        return "tests"
-    if "文档" in outcome or "报告" in outcome:
-        return "docs"
-    if "质量" in outcome or "优化" in outcome:
-        return "quality"
-    return "task"
+        return "单元测试"
+    for scope, keywords in COMMIT_SCOPE_RULES:
+        if _contains_any(lowered_text, keywords):
+            return scope
+    path_hint = _extract_path_hint(outcome)
+    if path_hint != DEFAULT_PATH_HINT:
+        return _scope_from_path(path_hint)
+    return "业务逻辑"
+
+
+def _commit_change_type(outcome: str) -> str:
+    if "拆分" in outcome or "长函数" in outcome:
+        return "拆分函数"
+    if "补齐" in outcome or "新增" in outcome or "添加" in outcome:
+        return "新增内容"
+    if "修复" in outcome:
+        return "修复问题"
+    if "迁移" in outcome or "升级" in outcome:
+        return "迁移实现"
+    if "优化" in outcome or "重构" in outcome:
+        return "重构优化"
+    return "完成改动"
+
+
+def _extract_path_hint(text: str) -> str:
+    match = PATH_PATTERN.search(text)
+    if match:
+        return match.group(1).strip("`")
+    return DEFAULT_PATH_HINT
+
+
+def _scope_from_path(path_hint: str) -> str:
+    parts = [part for part in path_hint.strip("/").split("/") if part]
+    if len(parts) >= 2:
+        return parts[-2]
+    if parts:
+        return parts[0].split(".")[0]
+    return "业务逻辑"
 
 
 def _build_output_section(goal: _GoalFields) -> str:
