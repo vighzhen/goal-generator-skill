@@ -484,6 +484,38 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`（系统 Python 缓存权限限制后使用已授权提权重跑通过）、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、高质量批量任务 `--lint-output --output-file --report-json` 通过且写出断言、低质量字段批量任务 `--lint-output` 失败退出码且不写出交付物断言、`--lint-output --dry-run` 非生成模式失败退出码断言、`python3 scripts/batch_generate.py --help | grep -n "lint-output"`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过。
 
+
+## 第 15 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 15 轮要求重新读取全部 7 个范围内文件，复核第 14 轮 `--lint-output` 与前序批量流程；暂未发现新的 P0/P1 缺陷，本轮聚焦把单任务路径上下文画像扩展到批量任务清单。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量路径上下文画像 | 第 1/6 轮的 `--inspect-path` 能扫描一个本地路径并给出边界、验证命令和风险线索，但团队任务清单常包含多个模块或目录；当前需要逐条运行单任务扫描并手工汇总，难以在批量生成前统一补齐真实代码上下文。 | 在 `scripts/batch_generate.py` 新增任务级 `path`/`inspect_path`/`target_path` 字段和 `--inspect-paths` 模式，批量调用 `inspect_path_context`，按任务输出语言分布、验证命令、风险和建议字段；支持 `--filter`/`--limit`/`--sort-by`/`--dedupe`/`--summary-only`/`--report-json` 与 CI 失败退出。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量路径上下文画像 | 单任务 `scripts/generate_goal.py --inspect-path` | 单任务命令只能扫描一个路径；新功能读取 JSON/CSV 清单中的多个任务路径，输出任务级上下文报告并统一失败退出，适合团队批量任务预处理。 | 通过 |
+| 批量路径上下文画像 | 批量 `--dry-run` / `--lint-fields` | 这些能力检查描述和字段质量，但不读取本地文件系统事实；新功能从真实代码路径补充边界、验证命令和风险证据。 | 通过 |
+| 批量路径上下文画像 | 批量 `--questions` / `--merge-supplements` | 追问和补充合并处理需求方文本；新功能处理本地代码上下文来源，可减少对用户询问验证命令和范围线索的依赖。 | 通过 |
+| 批量路径上下文画像 | 批量 `--lint-output` | 输出自检检查最终 `/goal` 文本；新功能发生在生成前，帮助形成更具体的 6 要素草稿。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量路径上下文画像 | 多个批量任务各自指向不同目录或文件，需要在统一生成 `/goal` 前扫描真实代码结构、测试线索和项目验证命令。 | 为每个任务复制路径逐条运行 `generate_goal.py --inspect-path`，再人工拼接报告和建议字段，容易漏掉某个模块或路径错误。 | 一条命令完成整批路径扫描，报告每个任务的 `suggested_fields`、验证命令、风险和错误，可作为批量字段补全或追问依据。 | 从单路径扫描扩展到任务清单级代码事实采集，新增批量输入字段、任务级错误定位和 CI 门禁，不是单纯输出格式变体。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -492,7 +524,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，已完成第 14 轮，准备进入第 15 轮；累计修复 2 个问题，新增 14 个功能，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，已完成第 14 轮，第 15 轮审查清单已创建且待实现能力增强；累计修复 2 个问题，新增 14 个功能，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
