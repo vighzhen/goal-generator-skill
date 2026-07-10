@@ -47,3 +47,15 @@
 共 3 轮，累计发现 8 个问题，修复 8 个，跳过 0 个。
 
 剩余风险：未发现仍然存在的 P0/P1/P2 问题；批量生成和单任务生成已通过语法检查、dry-run、控制台输出与端到端生成验证。
+
+## 第 4 轮
+
+### 发现的问题
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P1 | scripts/batch_generate.py::_build_parser/main | 目标验证命令使用 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`，但当前 CLI 只接受 `--input`，导致验证命令失败；在不改变 `--input` 语义的前提下应兼容一个可选位置参数，降低用户误用成本。 | 待处理 | TBD |
+
+### 本轮总结
+
+发现 1 个问题，修复 0 个，跳过 0 个。
