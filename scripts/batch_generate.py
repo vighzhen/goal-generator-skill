@@ -156,8 +156,6 @@ def main(argv: list[str] | None = None) -> int:
             args.output_file,
             args.include_profile,
         )
-    if args.report_md:
-        _write_report_markdown(outputs, skipped_tasks, stats, Path(args.report_md), args.output_dir, args.output_file)
     print(_format_summary(stats))
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -174,7 +172,6 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
-    parser.add_argument("--report-md", help="把批量处理结果写入便于人工评审的 Markdown 报告。")
     parser.add_argument("--index-md", help="为批量输出产物写入 Markdown 导航索引。")
     parser.add_argument("--include-profile", action="store_true", help="在 JSON 报告中附加任务类型、风险评分和追问策略画像。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
@@ -895,85 +892,6 @@ def _write_output_index_markdown(
                 + " |"
             )
     index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _write_report_markdown(
-    outputs: list[TaskOutput],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-    output_dir: str | None,
-    output_file: str | None,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# Batch Goal Report",
-        "",
-        f"- 成功任务：{stats.success_count}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-        "## 成功任务",
-        "",
-    ]
-    lines.extend(_markdown_output_table(outputs, output_dir, output_file))
-    lines.extend(["", "## 跳过任务", ""])
-    lines.extend(_markdown_skipped_table(skipped_tasks))
-    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _markdown_output_table(
-    outputs: list[TaskOutput],
-    output_dir: str | None,
-    output_file: str | None,
-) -> list[str]:
-    if not outputs:
-        return ["无成功任务。"]
-    lines = [
-        "| 任务 | 输出路径 | 已具备要素 | 缺失要素 | 默认填充 |",
-        "| --- | --- | --- | --- | --- |",
-    ]
-    for output in outputs:
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(output.task_name),
-                    _markdown_cell(_report_output_path(output, output_dir, output_file) or "-"),
-                    _markdown_cell(_format_labels(output.present_keys)),
-                    _markdown_cell(_format_labels(output.missing_before_defaults)),
-                    _markdown_cell(_format_labels(output.defaulted_keys)),
-                ]
-            )
-            + " |"
-        )
-    return lines
-
-
-def _markdown_skipped_table(skipped_tasks: list[SkippedTask]) -> list[str]:
-    if not skipped_tasks:
-        return ["无跳过任务。"]
-    lines = [
-        "| 任务 | 原因 | 建议 |",
-        "| --- | --- | --- |",
-    ]
-    for skipped in skipped_tasks:
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(skipped.task_name),
-                    _markdown_cell(skipped.reason),
-                    _markdown_cell(skipped.suggestion),
-                ]
-            )
-            + " |"
-        )
-    return lines
-
-
-def _markdown_cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", "<br>").strip()
 
 
 def _write_task_list_report(
