@@ -1,87 +1,32 @@
-# Self Review Report
+# Self Evolution Report
 
 ## 第 1 轮
 
-### 发现的问题
+### 审查清单
+
+#### 问题（A）
 
 | 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P0 | scripts/batch_generate.py::_load_json_tasks | JSON 数组中出现非对象元素时，当前逻辑把错误文本当成 description 生成任务，导致解析失败任务没有被跳过，违背“解析失败的任务跳过并继续”的批量处理语义。 | 已修复 | b7bc65d |
-| 2 | P1 | scripts/generate_goal.py::_expected_commit_range | commit 数量识别只匹配包含 `commit` 的表达，无法识别“预期30-100个”这类中文常见写法，会把用户明确给出的范围误回退为默认 `4-12 个 commit`。 | 已修复 | a3c9def |
-| 3 | P1 | scripts/batch_generate.py::_slugify | 文件名 slug 化只保留 ASCII 字母数字，中文任务名会退化成 `task-1`、`task-2`，没有真正基于 `name` 字段命名，用户难以对应输出文件和任务。 | 已修复 | 7351264 |
-| 4 | P1 | scripts/generate_goal.py::INTERACTIVE_DEFAULTS | 默认约束写成“不改变既有功能行为”，当 Bug 修复任务缺少 constraints 时会与“修复错误行为”的 Outcome 冲突，生成自相矛盾的 /goal 指令。 | 已修复 | a98a5a9 |
-| 5 | P2 | README.md | 适用场景列表尚未明确包含“批量任务指令生成”，而 SKILL.md 已声明支持该场景，文档入口信息不完全一致。 | 已修复 | b45b35f |
+| - | - | 全部范围内文件 | 通读 scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md 后，未发现新的 P0/P1 缺陷；本轮重点转入能力进化。 | 无需修复 | - |
 
-### 本轮总结
+#### 能力增强点（B）
 
-发现 5 个问题，修复 5 个，跳过 0 个。
-
-## 第 2 轮
-
-### 发现的问题
-
-| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P1 | scripts/batch_generate.py::_description_fallback | 批量任务从 description 推断到某个要素存在时，会把整段 description 填入该要素；服务层单元测试示例因此把目标、验证、边界、迭代和受阻内容重复塞进 Outcome/Verification，生成的 /goal 可读性差且容易误导执行者。 | 已修复 | 7271e4d |
-| 2 | P1 | scripts/generate_goal.py::_needs_report | 报告需求识别只覆盖中文“报告/文档”和 README，无法识别 `OPTIMIZE_REPORT.md` 这类英文报告文件名；用户明确要求生成报告时仍会输出“不需要额外报告”。 | 已修复 | 2bfb1b5 |
-| 3 | P1 | scripts/generate_goal.py::_commit_examples | commit 示例只从 Outcome 中取路径，若 Outcome 提到报告文件而边界里才有代码目录，示例会优先落到报告文件，不能反映真实改动范围。 | 已修复 | 80f2d4c |
+| 1 | Markdown 表格批量输入 | 很多用户把任务清单写在需求文档、Issue 或 README 的 Markdown 表格里；当前必须手动转换成 JSON/CSV，增加使用门槛。 | 在 batch_generate.py 中新增 .md/.markdown 解析器，识别包含 name/description/6 要素列的 Markdown 表格，并补充示例和文档。 | 待实现 | - |
+| 2 | 任务类型画像与推荐模板 | 用户只给一句需求时，不知道自己缺哪些关键字段，也不知道不同任务类型应如何补齐 6 要素；当前 --analyze 只告诉缺失项，缺少模板化建议。 | 在 generate_goal.py 中新增 --profile，输出任务类型、复杂度、追问策略和 6 要素推荐模板 JSON；补充 README 和 SKILL 使用说明。 | 待实现 | - |
 
 ### 本轮总结
 
-发现 3 个问题，修复 3 个，跳过 0 个。
+修复 0 个问题，新增 0 个功能。
 
-## 第 3 轮
+## 用户纠正记录
 
-### 发现的问题
-
-| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
-| --- | --- | --- | --- | --- | --- |
-| - | - | 全部范围内文件 | 第 3 轮重新通读 scripts/、assets/、references/、SKILL.md、README.md、examples/ 和 SELF_REVIEW.md 后，当时未发现新的 P0 或 P1 问题；后续最终验证发现新的 CLI 兼容性问题并进入第 4 轮。 | 后续复核 | - |
-
-### 本轮总结
-
-第 3 轮审查完成，当时未发现 P0/P1 问题。后续最终验证发现新的 CLI 兼容性问题，已进入第 4 轮继续处理。发现 0 个问题，修复 0 个，跳过 0 个。
-
-
-## 第 4 轮
-
-### 发现的问题
-
-| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | P1 | scripts/batch_generate.py::_build_parser/main | 目标验证命令使用 `python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`，但当前 CLI 只接受 `--input`，导致验证命令失败；在不改变 `--input` 语义的前提下应兼容一个可选位置参数，降低用户误用成本。 | 已修复 | cbf5755 |
-
-### 本轮总结
-
-发现 1 个问题，修复 1 个，跳过 0 个。
-
-## 第 5 轮
-
-### 发现的问题
-
-| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
-| --- | --- | --- | --- | --- | --- |
-| 1 | P1 | SELF_REVIEW.md::最终总结 | 第 4 轮追加后，原“最终总结”仍停留在第 3 轮之后，导致最终总结位置和累计轮次/问题数不准确，无法作为最终审计证据。 | 已修复 | 8f132c5 |
-
-### 本轮总结
-
-发现 1 个问题，修复 1 个，跳过 0 个。
-
-
-## 第 6 轮
-
-### 发现的问题
-
-| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
-| --- | --- | --- | --- | --- | --- |
-| - | - | 全部范围内文件 | 第 6 轮重新通读 scripts/、assets/、references/、SKILL.md、README.md、examples/ 和 SELF_REVIEW.md 后，未发现新的 P0 或 P1 问题；未发现值得处理的 P2 问题。 | 循环终止 | - |
-
-### 本轮总结
-
-第 6 轮审查完成，未发现 P0/P1 问题，循环终止。发现 0 个问题，修复 0 个，跳过 0 个。
+| 时间 | 纠正内容 | 执行结果 | Commit |
+| --- | --- | --- | --- |
+| - | - | - | - |
 
 ## 最终总结
 
-共 6 轮，累计发现 10 个问题，修复 10 个，跳过 0 个。
-
-剩余风险：未发现仍然存在的 P0/P1/P2 问题；批量生成和单任务生成已通过语法检查、dry-run、控制台输出、输出目录、输出单文件、错误恢复与端到端生成验证。
+当前仍在持续进化循环中，尚未进入最终总结。
