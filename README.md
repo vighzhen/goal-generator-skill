@@ -314,6 +314,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 使用团队默认值覆盖缺失要素的默认填充
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --defaults-json team_defaults.json
 
+# 单独检查团队默认值文件合并后的 6 要素语义质量，不需要任务清单
+python3 scripts/batch_generate.py --lint-defaults-json team_defaults.json --report-json defaults_lint.json
+
 # 也可以用环境变量配置团队默认值文件；命令行 --defaults-json 优先级更高
 GOAL_GENERATOR_DEFAULTS_JSON=team_defaults.json python3 scripts/batch_generate.py --input examples/sample_tasks.json
 
@@ -360,6 +363,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--defaults-json <path>` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 可覆盖默认填充策略。
+- `--lint-defaults-json <path>` 不需要任务输入，会读取团队默认值文件（支持顶层 6 要素或 `fields` 包装）、合并交互默认值后检查语义质量；适合把默认值配置接入 CI，避免空泛默认值污染批量生成。
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。
 - `--check` 适合 CI 或交付前检查；`--strict` 和 `--fail-on-skipped` 可组合成质量门禁。
 - `--questions` 不生成 `/goal` 正文，而是按任务名汇总缺失要素并生成可直接发送的追问文案；可配合 `--output-file` 保存文案，配合 `--report-json` 保存任务级缺失结构。
@@ -443,6 +447,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
+- 团队默认值 JSON 语义质量门禁
 - 批量任务 6 要素字段语义质量门禁
 - 批量生成后最终 `/goal` 输出自检门禁
 - 批量任务路径上下文画像、项目验证命令和风险线索汇总

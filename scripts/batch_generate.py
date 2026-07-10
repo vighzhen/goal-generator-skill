@@ -112,6 +112,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     start_time = time.perf_counter()
+    if args.fail_on_high_risk and not args.profile_tasks:
+        print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
+        return 1
+    if args.lint_defaults_json:
+        if args.lint_output:
+            print("--lint-defaults-json 不生成 /goal，请勿与 --lint-output 同用。", file=sys.stderr)
+            return 1
+        try:
+            return _run_lint_defaults_mode(args, start_time)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"读取输入失败：{error}", file=sys.stderr)
+            return 1
     try:
         tasks = _load_tasks_from_input(_input_value_from_args(args))
         tasks = _filter_tasks(tasks, args.filter)
@@ -136,9 +148,6 @@ def main(argv: list[str] | None = None) -> int:
         or args.check
     ):
         print("--lint-output 只能用于真实批量生成模式，请勿与分析、检查或清单模式同用。", file=sys.stderr)
-        return 1
-    if args.fail_on_high_risk and not args.profile_tasks:
-        print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
         return 1
     if args.merge_supplements:
         try:
@@ -226,6 +235,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-dir", help="输出目录，每个任务生成一个 .txt 文件。")
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
+    parser.add_argument("--lint-defaults-json", help="检查团队默认值 JSON 合并后的 6 要素语义质量，不需要任务输入。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
@@ -350,6 +360,73 @@ def _run_list_tasks_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
+
+
+def _run_lint_defaults_mode(args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--lint-defaults-json 不支持 --output-dir，请使用 --output-file 写入检查报告。", file=sys.stderr)
+        return 1
+    lint_report = _lint_defaults_json_file(args.lint_defaults_json)
+    lint_text = json.dumps(lint_report, ensure_ascii=False, indent=2)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(lint_text, Path(args.output_file))
+    elif not summary_only:
+        print(lint_text)
+    elapsed_seconds = time.perf_counter() - start_time
+    if args.report_json:
+        _write_defaults_lint_report(lint_report, elapsed_seconds, Path(args.report_json))
+    print(_format_defaults_lint_summary(lint_report, elapsed_seconds))
+    return 0 if lint_report["passed"] else 1
+
+
+def _lint_defaults_json_file(defaults_file: str) -> dict[str, object]:
+    defaults_path = Path(defaults_file)
+    data = json.loads(defaults_path.read_text(encoding="utf-8"))
+    raw_defaults = data.get("fields", data) if isinstance(data, dict) else data
+    overrides = _fields_from_mapping(raw_defaults)
+    if not overrides:
+        raise ValueError("--lint-defaults-json 必须包含至少一个 6 要素默认值")
+    merged_fields = dict(INTERACTIVE_DEFAULTS)
+    merged_fields.update(overrides)
+    field_lint = lint_fields_json_data({"fields": merged_fields}, str(defaults_path))
+    return {
+        "passed": field_lint["passed"],
+        "source": str(defaults_path),
+        "override_count": len(overrides),
+        "overridden_fields": [key for key in ELEMENT_ORDER if key in overrides],
+        "overrides": {key: overrides[key] for key in ELEMENT_ORDER if key in overrides},
+        "merged_fields": merged_fields,
+        "field_lint": field_lint,
+        "summary": _defaults_lint_summary(bool(field_lint["passed"]), len(overrides), field_lint),
+    }
+
+
+def _write_defaults_lint_report(
+    lint_report: dict[str, object],
+    elapsed_seconds: float,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": 1 if lint_report["passed"] else 0,
+        "skipped_count": 0 if lint_report["passed"] else 1,
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "defaults_lint": lint_report,
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _defaults_lint_summary(passed: bool, override_count: int, field_lint: dict[str, object]) -> str:
+    score = field_lint.get("score", 0)
+    issue_count = field_lint.get("issue_count", 0)
+    if passed:
+        return f"团队默认值语义质量检查通过：覆盖 {override_count} 个字段，得分 {score}。"
+    return f"团队默认值语义质量检查未通过：覆盖 {override_count} 个字段，得分 {score}，问题 {issue_count} 个。"
+
+
+def _format_defaults_lint_summary(lint_report: dict[str, object], elapsed_seconds: float) -> str:
+    return f"{lint_report.get('summary', '团队默认值检查完成')} 总耗时 {elapsed_seconds:.2f} 秒。"
 
 
 def _run_batch_questions_mode(tasks: list[TaskSpec], args: argparse.Namespace, start_time: float) -> int:
