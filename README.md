@@ -314,6 +314,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 默认填充数量门禁：每个任务最多允许默认填充 2 个要素，超限任务会跳过并返回非零退出码
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-defaulted-fields 2 --report-json batch_report.json
 
+# 显式来源门禁：要求 verification 和 boundaries 必须由 fields 或 description 标签明确提供
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-explicit-fields verification,boundaries --report-json batch_report.json
+
 # 校验清单快捷模式：等价于 dry-run + strict + summary-only + fail-on-skipped
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --check --report-json batch_report.json
 
@@ -381,6 +384,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--max-defaulted-fields <0-6>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；当某任务默认填充数量超过阈值时，该任务会跳过并让命令返回非零退出码，适合在完全 `--strict` 前做渐进式质量门禁。
+- `--require-explicit-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，多个字段用逗号、分号、顿号或换行分隔。被要求的字段必须来自任务 `fields` 或 `description` 中的显式标签，不能只靠描述启发式推断或默认值兜底。
 - `--defaults-json <path>` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 可覆盖默认填充策略。
 - `--lint-defaults-json <path>` 不需要任务输入，会读取团队默认值文件（支持顶层 6 要素或 `fields` 包装）、合并交互默认值后检查语义质量；适合把默认值配置接入 CI，避免空泛默认值污染批量生成。
 - `--report-json <path>` 是保留的批量报告格式，包含成功任务、缺失项、默认填充项、输出路径、跳过原因和修复建议。

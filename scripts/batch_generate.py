@@ -15,6 +15,7 @@ from typing import Any
 from generate_goal import (
     ELEMENT_LABELS,
     ELEMENT_ORDER,
+    FIELD_ALIASES,
     INTERACTIVE_DEFAULTS,
     QUESTION_EXAMPLES,
     _GoalFields,
@@ -116,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         min_lint_score = _min_lint_score_from_args(args)
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
+        required_explicit_fields = _required_explicit_fields_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -201,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         default_values,
         args.verbose,
         max_defaulted_fields,
+        required_explicit_fields,
     )
     output_lint_report = None
     if args.lint_output:
@@ -244,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_lint_output_summary(output_lint_report))
     print(_format_summary(stats))
     if max_defaulted_fields is not None and _has_defaulted_limit_skips(skipped_tasks):
+        return 1
+    if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -290,6 +295,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-defaulted-fields",
         type=int,
         help="真实生成或 dry-run 时允许每个任务最多默认填充的 6 要素数量（0-6）。",
+    )
+    parser.add_argument(
+        "--require-explicit-fields",
+        help="真实生成、dry-run、check 或 lint-output 时要求指定 6 要素必须由 fields 或 description 标签显式提供，多个字段用逗号分隔。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -339,6 +348,61 @@ def _max_defaulted_fields_from_args(args: argparse.Namespace) -> int | None:
     ):
         raise ValueError("--max-defaulted-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return max_defaulted_fields
+
+
+def _required_explicit_fields_from_args(args: argparse.Namespace) -> list[str]:
+    required_fields_value = args.require_explicit_fields
+    if not required_fields_value:
+        return []
+    if (
+        args.lint_defaults_json
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-explicit-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    fields: list[str] = []
+    seen: set[str] = set()
+    unknown_tokens: list[str] = []
+    for raw_token in DEPENDENCY_SPLIT_PATTERN.split(required_fields_value):
+        token = raw_token.strip()
+        if not token:
+            continue
+        field = _explicit_field_key(token)
+        if not field:
+            unknown_tokens.append(token)
+            continue
+        if field not in seen:
+            fields.append(field)
+            seen.add(field)
+    if unknown_tokens:
+        supported = "、".join(ELEMENT_ORDER)
+        raise ValueError(f"--require-explicit-fields 包含未知字段：{'、'.join(unknown_tokens)}；可选：{supported}")
+    if not fields:
+        raise ValueError("--require-explicit-fields 必须包含至少一个 6 要素字段")
+    return fields
+
+
+def _explicit_field_key(token: str) -> str:
+    normalized_token = token.strip().lower()
+    for key in ELEMENT_ORDER:
+        if normalized_token == key:
+            return key
+        if normalized_token == ELEMENT_LABELS[key].lower():
+            return key
+        english_label = ELEMENT_LABELS[key].split("（", 1)[0].strip().lower()
+        if normalized_token == english_label:
+            return key
+        aliases = FIELD_ALIASES.get(key, ())
+        if any(normalized_token == alias.lower() for alias in aliases):
+            return key
+    return ""
 
 
 def _load_tasks_from_input(input_value: str) -> list[TaskSpec]:
@@ -2477,6 +2541,7 @@ def _process_tasks(
     default_values: dict[str, str],
     verbose: bool,
     max_defaulted_fields: int | None = None,
+    required_explicit_fields: list[str] | None = None,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -2497,6 +2562,7 @@ def _process_tasks(
                 used_slugs,
                 verbose,
                 max_defaulted_fields,
+                required_explicit_fields or [],
             )
             outputs.append(output)
         except (ValueError, OSError) as error:
@@ -2526,6 +2592,8 @@ def _skip_suggestion(reason: str) -> str:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
         return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
+    if "缺少显式要素" in reason:
+        return "在任务 fields 中填写这些要素，或在 description 中使用字段标签显式写出对应内容。"
     if "必须是对象" in reason:
         return "把该任务改成包含 name、description、fields 的对象。"
     if "不支持的输入格式" in reason:
@@ -2544,11 +2612,15 @@ def _process_one_task(
     used_slugs: set[str],
     verbose: bool,
     max_defaulted_fields: int | None = None,
+    required_explicit_fields: list[str] | None = None,
 ) -> TaskOutput:
     if task.load_error:
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
+    missing_explicit_fields = _missing_explicit_fields(task, required_explicit_fields or [])
+    if missing_explicit_fields:
+        raise ValueError(_missing_explicit_fields_error(missing_explicit_fields))
     prepared = _prepare_task(task, strict, default_values)
     if max_defaulted_fields is not None and len(prepared.defaulted_keys) > max_defaulted_fields:
         raise ValueError(_defaulted_limit_error(prepared.defaulted_keys, max_defaulted_fields))
@@ -2576,6 +2648,27 @@ def _defaulted_limit_error(defaulted_keys: list[str], max_defaulted_fields: int)
 
 def _has_defaulted_limit_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("超过 --max-defaulted-fields" in skipped.reason for skipped in skipped_tasks)
+
+
+def _missing_explicit_fields(task: TaskSpec, required_fields: list[str]) -> list[str]:
+    if not required_fields:
+        return []
+    explicit_fields = _explicit_task_fields(task)
+    return [key for key in required_fields if key not in explicit_fields]
+
+
+def _explicit_task_fields(task: TaskSpec) -> set[str]:
+    fields = {key for key, value in task.fields.items() if value}
+    fields.update(_extract_labeled_fields(task.description).keys())
+    return fields
+
+
+def _missing_explicit_fields_error(missing_fields: list[str]) -> str:
+    return f"缺少显式要素：{_format_labels(missing_fields)}；--require-explicit-fields 要求这些字段来自 fields 或 description 标签"
+
+
+def _has_explicit_field_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("缺少显式要素" in skipped.reason for skipped in skipped_tasks)
 
 
 def _prepare_task(
