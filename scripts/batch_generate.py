@@ -22,7 +22,6 @@ from generate_goal import (
     analyze_description,
     build_task_profile,
     build_goal_json_draft,
-    check_redaction,
     render_goal_text,
     score_description,
     suggest_goal_fields,
@@ -138,12 +137,6 @@ class GoalJsonDraft:
 
 
 @dataclass(frozen=True)
-class TaskRedactionSummary:
-    task: TaskSpec
-    check: dict[str, object]
-
-
-@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -172,8 +165,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.draft_jsonl:
         return _run_draft_jsonl_mode(tasks, args)
-    if args.redaction_report_md:
-        return _run_redaction_report_mode(tasks, args)
     if args.export_fields_json:
         return _run_export_fields_json_mode(tasks, args)
     if args.score_summary or args.score_report_md or args.fail_below_score is not None:
@@ -241,7 +232,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile-summary", action="store_true", help="只输出批量任务类型、风险和缺失要素摘要，不生成 /goal。")
     parser.add_argument("--score-summary", action="store_true", help="只输出批量任务 /goal 可执行度评分摘要，不生成 /goal。")
     parser.add_argument("--score-report-md", help="把批量任务 /goal 可执行度评分写入 Markdown 报告。")
-    parser.add_argument("--redaction-report-md", help="把批量任务中的敏感信息发现、脱敏预览和处理建议写入 Markdown 报告。")
     parser.add_argument("--draft-jsonl", help="把每个任务的 Goal JSON 草稿写入单个 JSONL 文件，适合流水线逐行消费。")
     parser.add_argument("--fail-below-score", type=int, help="当任一任务可执行度分数低于阈值时返回退出码 1，适合 CI 门禁。")
     parser.add_argument("--export-fields-json", help="为每个任务导出可编辑的 6 要素字段建议 JSON 到指定目录。")
@@ -427,46 +417,6 @@ def _run_draft_jsonl_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> in
     if fail_on_skipped and stats.skipped_count:
         return 1
     return 0
-
-
-def _run_redaction_report_mode(tasks: list[TaskSpec], args: argparse.Namespace) -> int:
-    start_time = time.perf_counter()
-    redaction_summaries, skipped_tasks = _build_redaction_summaries(tasks, args.dedupe)
-    stats = BatchStats(len(redaction_summaries), len(skipped_tasks), time.perf_counter() - start_time)
-    report_path = Path(args.redaction_report_md)
-    _write_redaction_report_markdown(redaction_summaries, skipped_tasks, stats, report_path)
-    if args.report_json:
-        _write_redaction_summary_report(redaction_summaries, skipped_tasks, stats, Path(args.report_json))
-    if not args.summary_only:
-        print(f"已写入敏感信息报告：{report_path}")
-    print(_format_summary(stats))
-    fail_on_skipped = args.fail_on_skipped or args.check
-    if fail_on_skipped and stats.skipped_count:
-        return 1
-    return 0
-
-
-def _build_redaction_summaries(
-    tasks: list[TaskSpec],
-    dedupe: bool,
-) -> tuple[list[TaskRedactionSummary], list[SkippedTask]]:
-    summaries: list[TaskRedactionSummary] = []
-    skipped_tasks: list[SkippedTask] = []
-    seen_task_keys: set[str] = set()
-    for task in tasks:
-        if dedupe and _is_duplicate_task(task, seen_task_keys):
-            reason = "重复任务：任务名和描述已出现过"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        if task.load_error:
-            skipped_tasks.append(SkippedTask(task.name, task.load_error, _skip_suggestion(task.load_error)))
-            continue
-        if not task.description:
-            reason = "缺少 description"
-            skipped_tasks.append(SkippedTask(task.name, reason, _skip_suggestion(reason)))
-            continue
-        summaries.append(TaskRedactionSummary(task, check_redaction(task.description)))
-    return summaries, skipped_tasks
 
 
 def _write_draft_jsonl(
@@ -1590,29 +1540,6 @@ def _write_draft_jsonl_report(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_redaction_summary_report(
-    redaction_summaries: list[TaskRedactionSummary],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report = {
-        "success_count": stats.success_count,
-        "skipped_count": stats.skipped_count,
-        "elapsed_seconds": round(stats.elapsed_seconds, 4),
-        "tasks": [
-            {
-                "name": summary.task.name,
-                "redaction": summary.check,
-            }
-            for summary in redaction_summaries
-        ],
-        "skipped": [_skipped_report(skipped) for skipped in skipped_tasks],
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
 def _draft_jsonl_report_item(draft: GoalJsonDraft) -> dict[str, object]:
     payload = draft.draft
     return {
@@ -1659,70 +1586,6 @@ def _write_score_report_markdown(
     lines.extend(["", "## 跳过任务", ""])
     lines.extend(_markdown_skipped_table(skipped_tasks))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _write_redaction_report_markdown(
-    redaction_summaries: list[TaskRedactionSummary],
-    skipped_tasks: list[SkippedTask],
-    stats: BatchStats,
-    report_path: Path,
-) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    needs_redaction = [summary for summary in redaction_summaries if _redaction_finding_count(summary.check)]
-    high_risk_count = sum(1 for summary in redaction_summaries if summary.check.get("risk_level") == "high")
-    lines = [
-        "# Batch Goal Redaction Report",
-        "",
-        f"- 可审计任务：{stats.success_count}",
-        f"- 需脱敏任务：{len(needs_redaction)}",
-        f"- 高风险任务：{high_risk_count}",
-        f"- 跳过任务：{stats.skipped_count}",
-        f"- 总耗时：{stats.elapsed_seconds:.2f} 秒",
-        "",
-        "## 敏感信息明细",
-        "",
-    ]
-    lines.extend(_redaction_report_table(redaction_summaries))
-    lines.extend(["", "## 跳过任务", ""])
-    lines.extend(_markdown_skipped_table(skipped_tasks))
-    report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-
-def _redaction_report_table(redaction_summaries: list[TaskRedactionSummary]) -> list[str]:
-    if not redaction_summaries:
-        return ["无可审计任务。"]
-    lines = [
-        "| 任务 | 风险 | 发现类型 | 数量 | 脱敏预览 | 建议 |",
-        "| --- | --- | --- | --- | --- | --- |",
-    ]
-    for summary in redaction_summaries:
-        check = summary.check
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(summary.task.name),
-                    _markdown_cell(str(check.get("risk_level", "none"))),
-                    _markdown_cell(_redaction_types_cell(check)),
-                    _markdown_cell(str(check.get("finding_count", 0))),
-                    _markdown_cell(str(check.get("redacted_preview", ""))),
-                    _markdown_cell(str(check.get("recommended_action", ""))),
-                ]
-            )
-            + " |"
-        )
-    return lines
-
-
-def _redaction_finding_count(check: dict[str, object]) -> int:
-    value = check.get("finding_count", 0)
-    return value if isinstance(value, int) else 0
-
-
-def _redaction_types_cell(check: dict[str, object]) -> str:
-    types = check.get("finding_types", [])
-    type_values = [str(item) for item in types] if isinstance(types, list) else []
-    return ",".join(type_values) if type_values else "无"
 
 
 def _markdown_score_table(scored_tasks: list[TaskScoreSummary]) -> list[str]:
