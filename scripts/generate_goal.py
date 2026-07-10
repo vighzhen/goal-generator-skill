@@ -66,6 +66,22 @@ OUTCOME_KEYWORDS: tuple[str, ...] = (
     "开发",
     "文档",
     "测试",
+    "implement",
+    "add",
+    "create",
+    "fix",
+    "optimize",
+    "refactor",
+    "migrate",
+    "upgrade",
+    "generate",
+    "cover",
+    "develop",
+    "build",
+    "write",
+    "update",
+    "remove",
+    "replace",
 )
 SPECIFICITY_KEYWORDS: tuple[str, ...] = (
     "接口",
@@ -79,6 +95,19 @@ SPECIFICITY_KEYWORDS: tuple[str, ...] = (
     "类",
     "报告",
     "覆盖率",
+    "endpoint",
+    "module",
+    "page",
+    "service",
+    "directory",
+    "folder",
+    "file",
+    "function",
+    "class",
+    "report",
+    "coverage",
+    "docs",
+    "tests",
 )
 VERIFICATION_ACTION_KEYWORDS: tuple[str, ...] = (
     "验证",
@@ -89,6 +118,17 @@ VERIFICATION_ACTION_KEYWORDS: tuple[str, ...] = (
     "通过",
     "跑测试",
     "测试通过",
+    "verify",
+    "validate",
+    "run",
+    "execute",
+    "check",
+    "pass",
+    "pytest",
+    "unittest",
+    "run tests",
+    "npm test",
+    "make test",
 )
 CONSTRAINT_KEYWORDS: tuple[str, ...] = (
     "不修改",
@@ -101,6 +141,18 @@ CONSTRAINT_KEYWORDS: tuple[str, ...] = (
     "保持",
     "兼容",
     "约束",
+    "do not",
+    "don't",
+    "must not",
+    "without",
+    "keep",
+    "preserve",
+    "compatible",
+    "compatibility",
+    "no new",
+    "avoid",
+    "forbid",
+    "constraint",
 )
 BOUNDARY_KEYWORDS: tuple[str, ...] = (
     "仅",
@@ -114,6 +166,15 @@ BOUNDARY_KEYWORDS: tuple[str, ...] = (
     "app/",
     "services/",
     "tests/",
+    "only",
+    "scope",
+    "within",
+    "under",
+    "include",
+    "exclude",
+    "except",
+    "directory",
+    "folder",
 )
 ITERATION_KEYWORDS: tuple[str, ...] = (
     "每个",
@@ -125,6 +186,15 @@ ITERATION_KEYWORDS: tuple[str, ...] = (
     "提交",
     "验证后",
     "预期",
+    "each",
+    "per",
+    "one by one",
+    "batch",
+    "iteration",
+    "commit",
+    "after validation",
+    "after verifying",
+    "expected",
 )
 BLOCKED_KEYWORDS: tuple[str, ...] = (
     "阻塞",
@@ -137,25 +207,52 @@ BLOCKED_KEYWORDS: tuple[str, ...] = (
     "人工",
     "不超过",
     "%",
+    "blocked",
+    "blocker",
+    "stop",
+    "ask me",
+    "ask user",
+    "skip",
+    "unable",
+    "unclear",
+    "missing",
+    "manual",
+    "no more than",
+    "cannot infer",
 )
-NEGATION_PREFIXES: tuple[str, ...] = ("非", "不", "没有", "无需", "无")
-TEST_TOOL_KEYWORDS: tuple[str, ...] = ("pytest", "unittest")
-REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "readme", "report", "说明", "审计")
-DETAIL_KEYWORDS: tuple[str, ...] = ("维度", "规则", "类别", "批量", "重构", "优化", "迁移")
+NEGATION_PREFIXES: tuple[str, ...] = ("非", "不", "没有", "无需", "无", "non-", "not", "no", "without")
+TEST_TOOL_KEYWORDS: tuple[str, ...] = ("pytest", "unittest", "unit test", "tests", "test suite", "coverage")
+REPORT_KEYWORDS: tuple[str, ...] = ("报告", "文档", "readme", "report", "说明", "审计", "docs", "documentation", "guide")
+DETAIL_KEYWORDS: tuple[str, ...] = (
+    "维度",
+    "规则",
+    "类别",
+    "批量",
+    "重构",
+    "优化",
+    "迁移",
+    "dimension",
+    "rule",
+    "category",
+    "batch",
+    "refactor",
+    "optimize",
+    "migration",
+)
 COMMIT_SCOPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("错误处理", ("错误处理", "异常", "错误码", "失败路径")),
-    ("类型注解", ("类型注解", "类型检查", "typing", "mypy")),
-    ("结构设计", ("结构设计", "结构", "拆分", "长函数", "架构")),
-    ("代码质量", ("代码质量", "质量", "优化", "坏味道")),
-    ("接口", ("接口", "api")),
-    ("文档", ("文档", "报告", "readme")),
-    ("数据迁移", ("迁移", "升级")),
+    ("错误处理", ("错误处理", "异常", "错误码", "失败路径", "error handling", "exception", "error code", "failure path")),
+    ("类型注解", ("类型注解", "类型检查", "typing", "mypy", "type hint", "type check")),
+    ("结构设计", ("结构设计", "结构", "拆分", "长函数", "架构", "architecture", "split", "long function")),
+    ("代码质量", ("代码质量", "质量", "优化", "坏味道", "code quality", "quality", "optimize", "cleanup")),
+    ("接口", ("接口", "api", "endpoint")),
+    ("文档", ("文档", "报告", "readme", "docs", "documentation", "report")),
+    ("数据迁移", ("迁移", "升级", "migration", "upgrade")),
 )
 PROFILE_RULES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     (
         "testing",
         "测试编写",
-        ("测试", "pytest", "unittest", "覆盖率", "用例"),
+        ("测试", "pytest", "unittest", "覆盖率", "用例", "tests", "unit test", "test suite", "coverage"),
         {
             "outcome": "明确测试目录、被测模块、目标用例数量或覆盖路径。",
             "verification": "指定局部测试命令和最终全量测试命令。",
@@ -168,7 +265,7 @@ PROFILE_RULES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     (
         "bugfix",
         "Bug 修复",
-        ("修复", "bug", "错误", "报错", "异常", "500"),
+        ("修复", "bug", "错误", "报错", "异常", "500", "fix", "error", "exception", "failure"),
         {
             "outcome": "明确复现条件、期望行为和修复后的用户可见结果。",
             "verification": "要求复现用例、回归测试或最小命令证明问题消失。",
@@ -181,7 +278,7 @@ PROFILE_RULES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     (
         "refactor",
         "代码质量优化/重构",
-        ("优化", "重构", "质量", "坏味道", "复杂度"),
+        ("优化", "重构", "质量", "坏味道", "复杂度", "optimize", "refactor", "quality", "cleanup", "complexity"),
         {
             "outcome": "明确处理目录、文件数量、质量维度和是否生成报告。",
             "verification": "要求每个改动后的语法/测试验证和最终审计证据。",
@@ -194,7 +291,7 @@ PROFILE_RULES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     (
         "docs",
         "文档生成",
-        ("文档", "报告", "readme", "说明"),
+        ("文档", "报告", "readme", "说明", "docs", "documentation", "report", "guide"),
         {
             "outcome": "明确目标文档、章节结构、覆盖对象和可追溯证据。",
             "verification": "要求检查链接、命令示例、路径引用和与代码一致性。",
@@ -215,12 +312,19 @@ DEFAULT_PROFILE_TEMPLATE: dict[str, str] = {
 }
 RISK_KEYWORD_RULES: tuple[tuple[str, int, str], ...] = (
     ("数据库", 20, "涉及数据库或持久化变更，需要明确迁移与回滚策略"),
+    ("database", 20, "涉及数据库或持久化变更，需要明确迁移与回滚策略"),
     ("迁移", 18, "涉及迁移任务，需要更严格的边界和兼容验证"),
+    ("migration", 18, "涉及迁移任务，需要更严格的边界和兼容验证"),
     ("全量", 16, "涉及全量范围，容易遗漏候选项或扩大改动"),
+    ("full", 16, "涉及全量范围，容易遗漏候选项或扩大改动"),
     ("公共 api", 15, "涉及公共 API，需确认兼容性和调用方影响"),
+    ("public api", 15, "涉及公共 API，需确认兼容性和调用方影响"),
     ("错误码", 12, "涉及错误码或响应契约，需避免破坏外部依赖"),
+    ("error code", 12, "涉及错误码或响应契约，需避免破坏外部依赖"),
     ("并发", 12, "涉及并发场景，验证面通常更复杂"),
+    ("concurrency", 12, "涉及并发场景，验证面通常更复杂"),
     ("批量", 10, "涉及批量处理，需要明确跳过和审计规则"),
+    ("batch", 10, "涉及批量处理，需要明确跳过和审计规则"),
 )
 INSPECT_SKIP_DIRS: tuple[str, ...] = (
     ".git",
@@ -1115,6 +1219,9 @@ def format_question_prompt(description: str) -> str:
 def _infer_profile(text: str) -> tuple[str, str, dict[str, str]]:
     lowered_text = text.lower()
     for profile_id, label, keywords, template in PROFILE_RULES:
+        if profile_id != "testing" and _matches_profile(profile_id, text, lowered_text, keywords):
+            return profile_id, label, template
+    for profile_id, label, keywords, template in PROFILE_RULES:
         if _matches_profile(profile_id, text, lowered_text, keywords):
             return profile_id, label, template
     return "generic", "通用编码任务", DEFAULT_PROFILE_TEMPLATE
@@ -1132,7 +1239,7 @@ def _estimate_complexity(text: str, missing: list[str]) -> tuple[str, list[str]]
         reasons.append("描述较长，可能包含多个子任务或隐含约束")
     if len(missing) >= 4:
         reasons.append("缺失 4 个以上必要要素，需要集中补齐")
-    if any(keyword in text for keyword in ("批量", "迁移", "升级", "多个", "全量")):
+    if any(keyword in text.lower() for keyword in ("批量", "迁移", "升级", "多个", "全量", "batch", "migration", "upgrade", "multiple", "full")):
         reasons.append("涉及批量或跨范围执行，需要更严格边界和迭代策略")
     if not reasons:
         return "low", ["描述较短且缺失要素较少"]
@@ -1552,11 +1659,11 @@ def _infer_commit_type(outcome: str) -> str:
     lowered_text = outcome.lower()
     if _mentions_test_task(outcome):
         return "test"
-    if "文档" in outcome or "报告" in outcome or "readme" in lowered_text:
+    if "文档" in outcome or "报告" in outcome or "readme" in lowered_text or "docs" in lowered_text or "documentation" in lowered_text:
         return "docs"
-    if "修复" in outcome or "bug" in lowered_text:
+    if "修复" in outcome or "bug" in lowered_text or "fix" in lowered_text or "error" in lowered_text:
         return "fix"
-    if "重构" in outcome or "优化" in outcome:
+    if "重构" in outcome or "优化" in outcome or "refactor" in lowered_text or "optimize" in lowered_text:
         return "refactor"
     return "feat"
 
@@ -1575,15 +1682,16 @@ def _infer_commit_scope(outcome: str) -> str:
 
 
 def _commit_change_type(outcome: str) -> str:
-    if "拆分" in outcome or "长函数" in outcome:
+    lowered_text = outcome.lower()
+    if "拆分" in outcome or "长函数" in outcome or "split" in lowered_text or "long function" in lowered_text:
         return "拆分函数"
-    if "补齐" in outcome or "新增" in outcome or "添加" in outcome:
+    if "补齐" in outcome or "新增" in outcome or "添加" in outcome or "add" in lowered_text or "create" in lowered_text:
         return "新增内容"
-    if "修复" in outcome:
+    if "修复" in outcome or "fix" in lowered_text:
         return "修复问题"
-    if "迁移" in outcome or "升级" in outcome:
+    if "迁移" in outcome or "升级" in outcome or "migrate" in lowered_text or "upgrade" in lowered_text:
         return "迁移实现"
-    if "优化" in outcome or "重构" in outcome:
+    if "优化" in outcome or "重构" in outcome or "optimize" in lowered_text or "refactor" in lowered_text:
         return "重构优化"
     return "完成改动"
 
@@ -1661,11 +1769,11 @@ def _extract_explicit_branch(outcome: str) -> str | None:
 
 def _branch_prefix(outcome: str) -> str:
     lowered_text = outcome.lower()
-    if "修复" in outcome or "bug" in lowered_text:
+    if "修复" in outcome or "bug" in lowered_text or "fix" in lowered_text or "error" in lowered_text:
         return "fix"
-    if "重构" in outcome:
+    if "重构" in outcome or "refactor" in lowered_text:
         return "refactor"
-    if "优化" in outcome or "质量" in outcome:
+    if "优化" in outcome or "质量" in outcome or "optimize" in lowered_text or "quality" in lowered_text:
         return "optimize"
     return "feature"
 
@@ -1676,11 +1784,11 @@ def _branch_slug(outcome: str) -> str:
         return "add-tests"
     if "api" in lowered_text or "接口" in outcome:
         return "api-task"
-    if "文档" in outcome or "报告" in outcome or "readme" in lowered_text:
+    if "文档" in outcome or "报告" in outcome or "readme" in lowered_text or "docs" in lowered_text or "documentation" in lowered_text:
         return "docs-task"
-    if "迁移" in outcome or "升级" in outcome:
+    if "迁移" in outcome or "升级" in outcome or "migration" in lowered_text or "migrate" in lowered_text or "upgrade" in lowered_text:
         return "migration-task"
-    if "质量" in outcome or "优化" in outcome:
+    if "质量" in outcome or "优化" in outcome or "quality" in lowered_text or "optimize" in lowered_text:
         return "code-quality"
     return DEFAULT_BRANCH_SLUG
 

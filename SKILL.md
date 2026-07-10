@@ -13,7 +13,7 @@ description: Codex CLI Goal 指令生成器。用户描述编码任务需求，S
 
 ## 2. 工作流步骤
 
-1. **接收输入**：读取用户的一句话需求或详细需求，识别任务类型，例如代码质量优化、重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成。
+1. **接收输入**：读取用户的一句话需求或详细需求（中文或常见英文编码任务描述均可），识别任务类型，例如代码质量优化、重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成。
 2. **判断单任务或批量任务**：如果用户一次提供多个编码任务需求，或提供 JSON/CSV 任务文件路径，调用 `scripts/batch_generate.py` 批量分析和生成；单个任务继续使用 `scripts/generate_goal.py`。
 3. **调用脚本分析**：单任务优先调用 `scripts/generate_goal.py --analyze "用户任务描述"`，用脚本输出的 JSON 作为缺失要素检查基线；如果需要判断任务类型、复杂度和推荐模板，调用 `scripts/generate_goal.py --profile "用户任务描述"`；如果用户只给出本地文件或目录、但没有说明范围和验证命令，调用 `scripts/generate_goal.py --inspect-path <路径> --path-task "用户目标"` 扫描代码上下文并获得边界/验证建议；如果任务描述可能包含 token、密钥、邮箱或 URL，先调用 `scripts/generate_goal.py --redaction-check "用户任务描述"` 做脱敏检查；如果已有 6 要素字段 JSON，调用 `scripts/generate_goal.py --validate-fields-json <文件>` 在 `--generate --from-json` 前检查字段完整性、未知字段和可渲染性；如果用户不理解缺失项或需要更可操作的补全优先级，调用 `scripts/generate_goal.py --explain-missing "用户任务描述"`；如果用户已明确任务类型，可用 `--list-templates` 和 `--template <id>` 直接取内置 6 要素模板；需要校验已有 `/goal` 文件时调用 `--validate-goal-file <文件>`；批量任务可先调用 `scripts/batch_generate.py --input <文件> --dry-run` 查看每个任务的完整度；必要时结合上下文人工复核。
 4. **检查 6 要素**：确认 Outcome、Verification Surface、Constraints、Boundaries、Iteration Policy、Blocked Stop Condition 是否齐全。需要深入理解要素时读取 `references/elements.md`。
@@ -129,7 +129,7 @@ Blocked Stop Condition 是何时允许跳过、何时必须停下问人。例如
 
 ## 9. 适用和不适用场景
 
-适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、从现有文件/目录反向整理 `/goal` 边界与验证线索、存在任务依赖的批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
+适用场景：代码质量优化/重构、新功能开发、接口/API 开发、测试编写、批量 Bug 修复、代码迁移/升级、文档生成、英文 Issue/PR/Jira 编码任务描述分析、从现有文件/目录反向整理 `/goal` 边界与验证线索、存在任务依赖的批量任务指令生成等需要 Codex 自主执行多个步骤的编码任务。
 
 不适用场景：非编码任务、主要依赖人工判断的设计决策、一次性小改动、没有明确验证面的探索性讨论。
 
@@ -139,5 +139,6 @@ Blocked Stop Condition 是何时允许跳过、何时必须停下问人。例如
 2. 分支名要按任务类型给出合理建议，例如 `feature/xxx`、`fix/xxx`、`refactor/xxx`、`optimize/xxx`。
 3. 用户没说清技术选择时必须追问，例如测试框架、数据库迁移策略、兼容版本范围。
 4. 不要把用户需求扩大成更复杂的工程治理任务。
-5. 不要在最终指令里加入无关系统说明；只输出执行目标任务需要的信息。
-6. 如果脚本输出和人工判断冲突，以更严格、更可验证的判断为准，并说明需要用户补充的具体缺口。
+5. 英文输入可以直接分析，但最终 `/goal` 指令仍以中文为主，英文路径、命令和 commit message 保留原文。
+6. 不要在最终指令里加入无关系统说明；只输出执行目标任务需要的信息。
+7. 如果脚本输出和人工判断冲突，以更严格、更可验证的判断为准，并说明需要用户补充的具体缺口。

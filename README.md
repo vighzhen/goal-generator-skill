@@ -40,6 +40,12 @@ python3 scripts/generate_goal.py --help
 python3 scripts/generate_goal.py --analyze "我要让 Codex 帮我给项目加单元测试"
 ```
 
+脚本也支持常见英文编码任务描述，可直接识别英文动作、验证命令、约束、边界、迭代和受阻条件：
+
+```bash
+python3 scripts/generate_goal.py --analyze "Add pytest unit tests for src/services, run pytest tests/services -q, do not change business logic, only touch src/services and tests/services, commit per module, ask me if expected behavior is unclear"
+```
+
 ### 生成任务类型画像和推荐模板
 
 使用 `--profile` 识别任务类型、复杂度、风险提示、追问策略，并给出该类型下 6 要素的推荐填写方向：
@@ -269,6 +275,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 代码迁移/升级
 - 文档生成
 - 批量任务指令生成（JSON/CSV）
+- 英文 Issue/PR/Jira 编码任务描述的 6 要素分析
 - 任务类型画像与 6 要素模板推荐
 - 缺失 6 要素的原因解释、优先级和补全建议
 - 从本地文件或目录反向整理 `/goal` 边界、验证命令和风险线索
