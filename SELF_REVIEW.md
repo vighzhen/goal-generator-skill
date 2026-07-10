@@ -267,11 +267,11 @@
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 批量任务列表预览 | 用户配置 filter/sort/limit 后想先确认会处理哪些任务，但 dry-run 会输出每个任务的要素详情，长清单不易快速核对。 | 在 batch_generate.py 新增 --list-tasks，仅输出当前筛选/排序/限制后的任务名称和摘要，不生成 /goal。 | 已实现 | 2fcf2a4 |
-| 2 | 批量画像报告 | 团队评审批量任务时希望看到每个任务类型、风险评分和追问策略，而不是逐个运行单任务 --profile。 | 在 batch_generate.py 新增 --include-profile，使 --report-json 的 tasks 追加 profile 画像信息。 | 已实现 | 待提交 |
+| 2 | 批量画像报告 | 团队评审批量任务时希望看到每个任务类型、风险评分和追问策略，而不是逐个运行单任务 --profile。 | 在 batch_generate.py 新增 --include-profile，使 --report-json 的 tasks 追加 profile 画像信息。 | 已实现 | 1ae98d3 |
 
 ### 本轮总结
 
-修复 0 个问题，新增 0 个功能。
+修复 0 个问题，新增 2 个功能。
 
 ## 用户纠正记录
 
