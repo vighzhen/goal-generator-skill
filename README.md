@@ -62,6 +62,14 @@ python3 scripts/generate_goal.py --list-templates
 python3 scripts/generate_goal.py --template bugfix
 ```
 
+### 查看能力清单
+
+使用 `--capabilities` 可输出当前单任务命令、批量输入格式、批量选项和模板 ID，适合工具集成或快速发现能力：
+
+```bash
+python3 scripts/generate_goal.py --capabilities
+```
+
 ### 生成一次性追问文案
 
 使用 `--questions` 可把缺失要素分析结果转成可直接发给需求方的中文追问文本：
@@ -242,6 +250,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 批量任务指令生成（JSON、JSONL、CSV、YAML、Markdown 表格）
 - 任务类型画像与 6 要素模板推荐
 - 内置任务模板库（测试、Bug 修复、重构、文档、通用任务）
+- 机器可读能力清单输出
 - 一键生成可复制的缺失要素追问文案
 - 单任务 analyze/profile/questions/generate 输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`

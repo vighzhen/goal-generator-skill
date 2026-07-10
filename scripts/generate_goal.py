@@ -321,6 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.list_templates:
             _emit_output(json.dumps(list_task_templates(), ensure_ascii=False, indent=2), args.output_file)
             return 0
+        if args.capabilities:
+            _emit_output(json.dumps(build_capabilities(), ensure_ascii=False, indent=2), args.output_file)
+            return 0
         if args.template:
             _emit_output(json.dumps(get_task_template(args.template), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -350,6 +353,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
+    parser.add_argument("--capabilities", action="store_true", help="输出当前单任务和批量生成能力清单 JSON。")
     parser.add_argument("--template", help="输出指定任务类型模板，例如 testing、bugfix、refactor、docs。")
     parser.add_argument("--questions", help="生成可直接粘贴给用户的一次性追问文本。")
     parser.add_argument("--generate", action="store_true", help="生成完整 /goal 指令文本。")
@@ -380,6 +384,53 @@ def list_task_templates() -> list[dict[str, str]]:
     templates = [{"id": profile_id, "label": label} for profile_id, label, _keywords, _template in PROFILE_RULES]
     templates.append({"id": "generic", "label": "通用编码任务"})
     return templates
+
+
+def build_capabilities() -> dict[str, object]:
+    """输出当前脚本和批量工具支持的能力清单。"""
+    return {
+        "single_task": {
+            "commands": [
+                "--analyze",
+                "--questions",
+                "--profile",
+                "--list-templates",
+                "--template",
+                "--capabilities",
+                "--generate",
+                "--interactive",
+                "--from-json",
+                "--output-file",
+            ],
+            "template_ids": [template["id"] for template in list_task_templates()],
+        },
+        "batch": {
+            "formats": ["json", "jsonl", "csv", "yaml", "markdown", "stdin-json", "stdin-jsonl"],
+            "options": [
+                "--input",
+                "--stdin-format",
+                "--defaults-json",
+                "GOAL_GENERATOR_DEFAULTS_JSON",
+                "--filter",
+                "--sort-by",
+                "--limit",
+                "--dedupe",
+                "--check",
+                "--strict",
+                "--fail-on-skipped",
+                "--summary-only",
+                "--output-dir",
+                "--output-file",
+                "--report-json",
+                "--verbose",
+            ],
+        },
+        "guarantees": [
+            "不引入第三方依赖",
+            "保持 /goal 五段式结构和分隔线格式",
+            "批量任务失败时跳过并继续处理其他任务",
+        ],
+    }
 
 
 def get_task_template(template_id: str) -> dict[str, object]:
