@@ -395,9 +395,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.score:
             _emit_output(json.dumps(score_description(args.score), ensure_ascii=False, indent=2), args.output_file)
             return 0
-        if args.goal_json:
-            _emit_output(json.dumps(build_goal_json_draft(args.goal_json), ensure_ascii=False, indent=2), args.output_file)
-            return 0
         if args.redaction_check:
             _emit_output(json.dumps(check_redaction(args.redaction_check), ensure_ascii=False, indent=2), args.output_file)
             return 0
@@ -438,7 +435,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analyze", help="分析用户任务描述并输出缺失要素 JSON。")
     parser.add_argument("--profile", help="识别任务类型、复杂度和推荐 6 要素模板。")
     parser.add_argument("--score", help="输出任务描述的 /goal 可执行度评分、等级和下一步建议。")
-    parser.add_argument("--goal-json", help="生成面向 IDE、机器人或流水线的 Goal JSON 草稿，包含 6 要素、复核状态、校验结果和下一步命令。")
     parser.add_argument("--redaction-check", help="检查任务描述中疑似 token、密钥、邮箱或 URL 等敏感信息，并输出脱敏预览 JSON。")
     parser.add_argument("--explain-missing", help="解释缺失 6 要素的原因、优先级和可直接追问的补全建议。")
     parser.add_argument("--list-templates", action="store_true", help="列出内置任务类型模板。")
@@ -724,84 +720,6 @@ def score_description(description: str) -> dict[str, object]:
     }
 
 
-def build_goal_json_draft(
-    description: str,
-    field_overrides: dict[str, str] | None = None,
-    override_source: str = "input_fields",
-) -> dict[str, object]:
-    """生成面向 IDE、机器人或流水线的机器可读 /goal 草稿。"""
-    if not description.strip():
-        raise ValueError("--goal-json 不能为空，请提供任务描述")
-    suggestion = suggest_goal_fields(description)
-    fields = _ordered_field_mapping(suggestion.get("fields", {}))
-    sources = _ordered_source_mapping(suggestion.get("sources", {}))
-    if field_overrides:
-        _apply_field_overrides(fields, sources, field_overrides, override_source)
-    validation = validate_fields_json_data({"fields": fields}, "goal-json-draft")
-    review_required = _review_required_keys(sources)
-    score = score_description(description)
-    profile = build_task_profile(description)
-    return {
-        "description_preview": _normalize_text(description)[:TEXT_PREVIEW_LENGTH],
-        "ready_to_generate": bool(validation.get("valid")) and not review_required,
-        "review_required": review_required,
-        "fields": fields,
-        "sources": sources,
-        "validation": validation,
-        "missing": review_required,
-        "missing_before_overrides": suggestion.get("missing", []),
-        "present": suggestion.get("present", {}),
-        "task_type": profile.get("task_type", {}),
-        "readiness_score": score.get("readiness_score", 0),
-        "readiness_level": score.get("readiness_level", "unknown"),
-        "risk_level": profile.get("risk_level", "unknown"),
-        "risk_score": profile.get("risk_score", 0),
-        "recommended_commands": _goal_json_recommended_commands(review_required),
-        "note": "review_required 中的字段来自推荐方向，执行 --generate --from-json 前请按真实项目情况复核。",
-    }
-
-
-def _ordered_field_mapping(value: object) -> dict[str, str]:
-    values = value if isinstance(value, dict) else {}
-    return {key: str(values.get(key, "")).strip() for key in ELEMENT_ORDER}
-
-
-def _ordered_source_mapping(value: object) -> dict[str, str]:
-    values = value if isinstance(value, dict) else {}
-    return {key: str(values.get(key, "unknown")) for key in ELEMENT_ORDER}
-
-
-def _apply_field_overrides(
-    fields: dict[str, str],
-    sources: dict[str, str],
-    overrides: dict[str, str],
-    override_source: str,
-) -> None:
-    for key in ELEMENT_ORDER:
-        value = overrides.get(key)
-        if value is None or not str(value).strip():
-            continue
-        fields[key] = str(value).strip()
-        sources[key] = override_source
-
-
-def _review_required_keys(sources: dict[str, str]) -> list[str]:
-    return [key for key in ELEMENT_ORDER if sources.get(key) == "recommended_direction"]
-
-
-def _goal_json_recommended_commands(review_required: list[str]) -> dict[str, str]:
-    if review_required:
-        return {
-            "review": "人工复核 review_required 字段后保存为 goal_fields.json",
-            "validate": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
-            "generate": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
-        }
-    return {
-        "validate": "python3 scripts/generate_goal.py --validate-fields-json goal_fields.json",
-        "generate": "python3 scripts/generate_goal.py --generate --from-json goal_fields.json",
-    }
-
-
 def _numeric_profile_value(profile: dict[str, object], key: str) -> int:
     value = profile.get(key, 0)
     if isinstance(value, int):
@@ -872,36 +790,6 @@ def _readiness_recommended_command(level: str) -> str:
     if level == "ready":
         return "python3 scripts/generate_goal.py --generate ..."
     return "python3 scripts/generate_goal.py --explain-missing '<任务描述>'"
-
-
-def suggest_goal_fields(description: str) -> dict[str, object]:
-    """从任务描述生成可编辑、可机器读取的 6 要素字段建议。"""
-    if not description.strip():
-        raise ValueError("--suggest-fields 不能为空，请提供任务描述")
-    field_values = _extract_labeled_fields(description)
-    analysis = analyze_description(description)
-    _merge_present_fallbacks(field_values, description, analysis)
-    profile = build_task_profile(description)
-    recommendations = _recommended_field_mapping(profile)
-    fields: dict[str, str] = {}
-    sources: dict[str, str] = {}
-    for key in ELEMENT_ORDER:
-        value = field_values.get(key)
-        if value:
-            fields[key] = value
-            sources[key] = "input_or_detected"
-            continue
-        fields[key] = str(recommendations.get(key, DEFAULT_PROFILE_TEMPLATE[key]))
-        sources[key] = "recommended_direction"
-    return {
-        "fields": fields,
-        "sources": sources,
-        "missing": analysis["missing"],
-        "present": analysis["present"],
-        "task_type": profile.get("task_type", {}),
-        "score": score_description(description),
-        "note": "sources 为 recommended_direction 的字段是补全方向，不是用户确认后的最终事实；执行 --generate 前请按真实项目情况编辑。",
-    }
 
 
 def explain_missing_elements(description: str) -> dict[str, object]:
