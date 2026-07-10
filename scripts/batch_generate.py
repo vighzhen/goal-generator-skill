@@ -313,9 +313,15 @@ def _unique_slug(name: str, index: int, used_slugs: set[str]) -> str:
 
 
 def _slugify(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9-]+", "-", value.lower())
+    normalized = "".join(_slug_char(character) for character in value.lower())
     collapsed = re.sub(r"-+", "-", normalized).strip("-")
     return collapsed[:SLUG_MAX_LENGTH].strip("-")
+
+
+def _slug_char(character: str) -> str:
+    if character.isalnum() or character == "-":
+        return character
+    return "-"
 
 
 def _string_value(value: Any) -> str:
