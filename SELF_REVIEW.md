@@ -1413,6 +1413,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help` 断言包含 `--min-description-length`、长描述清单 `--dry-run --min-description-length 20` 通过、混合清单 `--dry-run --min-description-length 20 --report-json` 返回失败并断言短描述跳过原因和扩写建议、`--check --min-description-length 20` 返回失败、真实生成和 `--lint-output` 组合均返回失败且保留短描述跳过原因、`--profile-tasks --min-description-length 20` 无效组合参数错误、`--min-description-length 0` 参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 42 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 42 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 4076 行 sha256 0199ea8205dacd46、SKILL.md 144 行 sha256 ea5e1fe289bdda34、README.md 541 行 sha256 7427a68551e5bb42、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 41 轮描述长度门禁、依赖计划、依赖合法性门禁和依赖拓扑排序能力；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量依赖顺序一致性门禁 | 现有 `--dependency-order` 会自动拓扑重排，`--require-valid-dependencies` 只检查依赖图是否合法但不判断当前输入顺序是否已经满足“前置任务先出现”。团队有时希望保留人工排序或文件顺序，同时确保依赖任务确实排在依赖方之前；当前只能人工读 `--plan-dependencies` 或接受自动重排。 | 在 `scripts/batch_generate.py` 新增 `--require-dependency-order`，用于真实生成、`--dry-run`、`--check` 和 `--lint-output` 前的准备流程；检查每个 `depends_on`/`dependencies` 引用是否存在、是否不是自依赖、是否指向当前任务之前的任务，并在重复任务名导致顺序不可判定时跳过相关任务。该门禁不改变任务顺序，可配合 `--require-valid-dependencies` 形成图合法性+顺序一致性双门禁。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量依赖顺序一致性门禁 | `--dependency-order` | `--dependency-order` 自动改变处理顺序；新功能不重排，只验证当前顺序是否已经满足依赖先后关系。 | 通过 |
+| 批量依赖顺序一致性门禁 | `--require-valid-dependencies` | 第 36 轮门禁只检查未知依赖、自依赖、重复名和循环依赖；新功能额外检查依赖任务是否在当前顺序中排在依赖方之前。 | 通过 |
+| 批量依赖顺序一致性门禁 | `--plan-dependencies` | `--plan-dependencies` 是分析模式输出波次；新功能把顺序一致性接入主流程退出码和跳过报告。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量依赖顺序一致性门禁 | 批量任务文件被人工排序、按 PR 批次排序或按发布步骤排序，团队希望确认每个依赖任务已经出现在使用它的任务之前，但又不想让工具自动改顺序。 | 先运行 `--plan-dependencies` 人工比对波次和原文件顺序，或使用 `--dependency-order` 但接受输出被重排。 | 一条命令在保持原顺序的同时阻断顺序错误、未知依赖、自依赖或重复名导致的不可判定顺序，便于 CI 保护人工排序。 | 这是依赖顺序一致性准入门禁，不是依赖图合法性检查、拓扑排序、计划展示或输出格式变化。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 42 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1421,7 +1455,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 41 轮已完成，准备进入第 42 轮；累计修复 4 个已完成问题，新增 41 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 42 轮审查已完成，准备实现批量依赖顺序一致性门禁；累计修复 4 个已完成问题，新增 41 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
