@@ -1276,6 +1276,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "no-overwrite"`、新输出文件 `--output-file --no-overwrite` 成功写入、已存在 `--output-file` 返回失败退出码且旧内容不变、已存在 `--output-dir/alpha.txt` 返回失败退出码且旧内容不变、已存在 `--report-json` 返回失败退出码且正文输出未创建、`--output-file` 与 `--report-json` 指向同一路径时返回失败并不创建文件、`--profile-tasks --no-overwrite` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 38 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 38 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3954 行 sha256 576cc49f765ced9a、SKILL.md 144 行 sha256 66607f98b7d103ee、README.md 521 行 sha256 c5df67dae0f27b3d、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 37 轮输出覆盖保护门禁、批量任务读取/筛选/limit 和主流程参数校验；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务数量上限门禁 | 团队在 CI 或本地批量生成时，输入清单可能因机器人导出错误、筛选条件缺失或合并误操作突然变成几十/上百个任务；现有 `--limit` 只能截断处理，不能作为“超过预期就失败”的安全门禁，容易让用户误以为整批任务都已审查。 | 在 `scripts/batch_generate.py` 新增 `--max-task-count <N>`，在任务读取、filter、sort、limit 后检查当前将处理的任务数量；超过阈值时在进入生成/分析前失败并返回非零退出码，不截断任务。该门禁可配合真实生成、`--dry-run`、`--check`、画像/追问/路径扫描等读取任务的批量模式，但不用于不读取任务清单的默认值检查或原始 Schema 检查。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务数量上限门禁 | `--limit` | `--limit` 截断并继续处理前 N 个任务；新功能在超过阈值时失败，不自动丢弃后续任务，适合作为 CI 安全阈值。 | 通过 |
+| 批量任务数量上限门禁 | `--filter` | `--filter` 选择匹配任务；新功能检查筛选后的任务数量是否超过团队预期，不负责选择任务。 | 通过 |
+| 批量任务数量上限门禁 | `--check` / `--fail-on-skipped` | 这些门禁检查任务质量或跳过项；新功能检查任务规模，防止意外大批量进入耗时或高风险处理。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务数量上限门禁 | CI 或机器人批量清单只允许本次处理不超过固定数量，例如最多 20 个任务；超过说明筛选条件或导出范围可能错误。 | 人工数清单、先跑 `--list-tasks` 再判断，或用外部脚本计数；用 `--limit` 会静默截断而不是暴露异常。 | 一条命令把任务规模变成可失败的安全阈值，阻止意外大批量生成或分析，并提示用户调整筛选/limit/输入清单。 | 这是批量规模准入门禁，不是任务截断、展示格式、字段质量检查或输出报告变体。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 38 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1284,7 +1318,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 37 轮已完成，准备进入第 38 轮；累计修复 4 个已完成问题，新增 37 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 38 轮审查已完成，准备实现批量任务数量上限门禁；累计修复 4 个已完成问题，新增 37 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
