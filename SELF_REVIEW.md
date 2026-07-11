@@ -1447,6 +1447,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help` 断言包含 `--require-dependency-order`、依赖顺序正确清单 `--dry-run --require-dependency-order` 通过、依赖位于当前任务之后清单返回失败并断言“依赖顺序错误”、未知依赖返回失败并断言“依赖不存在”、自依赖返回失败并断言“任务依赖自身”、重复任务名及引用重复任务名返回失败并断言相关错误、`--check`/真实生成/`--lint-output` 均在坏顺序清单中返回非零并在报告保留“依赖顺序无效”、`--dependency-order --require-dependency-order`、`--plan-dependencies --require-dependency-order`、`--profile-tasks --require-dependency-order` 无效组合均返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+
+## 第 43 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 43 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 4185 行 sha256 65c44d5c730cc152、SKILL.md 144 行 sha256 165be945c0f7be12、README.md 546 行 sha256 48b9029c0d442ab8、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 42 轮依赖顺序一致性门禁、画像风险阈值门禁和主流程生成门禁；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量主流程任务风险阈值门禁 | `--profile-tasks --fail-on-risk-level` 只能在画像模式中阻断 high/medium/low 风险任务；真实生成、`--dry-run`、`--check` 或 `--lint-output` 主流程如果忘记先跑画像，仍可能把数据库迁移、全量改造、公共 API 等高风险描述直接生成或写出。 | 在 `scripts/batch_generate.py` 新增 `--fail-on-task-risk-level <low|medium|high>`，用于真实生成、`--dry-run`、`--check` 和 `--lint-output` 前的准备流程；逐任务复用 `build_task_profile` 计算风险等级，达到阈值及以上的任务跳过并返回非零退出码，报告保留风险等级、分数和修复建议。该门禁不替代 `--profile-tasks` 的画像报告，而是把风险阈值接入主流程。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量主流程任务风险阈值门禁 | `--profile-tasks --fail-on-risk-level` | 既有能力只在画像分析模式失败，不进入主生成流程；新功能在真实生成、dry-run、check 和 lint-output 中阻断风险任务，减少脚本遗漏预检的风险。 | 通过 |
+| 批量主流程任务风险阈值门禁 | `--fail-on-high-risk` | 既有参数固定或自定义画像模式的风险阈值；新功能是主流程准入门禁，不输出画像矩阵，也不要求用户切换命令。 | 通过 |
+| 批量主流程任务风险阈值门禁 | `--lint-fields` / `--lint-output` | 字段/输出 lint 检查 6 要素语义质量；新功能检查任务风险类别和等级，关注执行风险而非文本质量。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量主流程任务风险阈值门禁 | CI 或批量生成脚本希望真实生成前自动阻断达到指定风险等级的任务，避免高风险任务绕过画像预检。 | 先单独运行 `--profile-tasks --fail-on-risk-level`，再运行生成命令；如果脚本漏掉第一步，高风险任务仍可进入生成。 | 一条主流程命令即可在生成或检查前跳过并失败高风险任务，报告指出风险等级和建议，降低漏预检成本。 | 这是主流程风险准入门禁，不是画像展示、字段质量检查、输出格式变化或已有门禁的别名。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 43 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1455,7 +1490,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 42 轮已完成并准备进入第 43 轮；累计修复 4 个已完成问题，新增 42 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 43 轮审查已完成，准备实现批量主流程任务风险阈值门禁；累计修复 4 个已完成问题，新增 42 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
