@@ -154,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         require_unique_task_names = _require_unique_task_names_from_args(args)
         required_name_pattern = _required_name_pattern_from_args(args)
         require_valid_dependencies = _require_valid_dependencies_from_args(args)
+        require_dependency_order = _require_dependency_order_from_args(args)
         no_overwrite = _no_overwrite_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
@@ -261,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         require_unique_task_names,
         required_name_pattern,
         require_valid_dependencies,
+        require_dependency_order,
     )
     try:
         _ensure_no_overwrite_targets(
@@ -333,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     if required_name_pattern and _has_name_pattern_skips(skipped_tasks):
         return 1
     if require_valid_dependencies and _has_dependency_gate_skips(skipped_tasks):
+        return 1
+    if require_dependency_order and _has_dependency_order_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -423,6 +427,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-valid-dependencies",
         action="store_true",
         help="真实生成、dry-run、check 或 lint-output 时要求 depends_on/dependencies 依赖图合法但不改变任务顺序。",
+    )
+    parser.add_argument(
+        "--require-dependency-order",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求依赖任务在当前任务之前出现但不重排任务。",
     )
     parser.add_argument(
         "--no-overwrite",
@@ -709,6 +718,28 @@ def _require_valid_dependencies_from_args(args: argparse.Namespace) -> bool:
         or args.list_tasks
     ):
         raise ValueError("--require-valid-dependencies 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
+
+
+def _require_dependency_order_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_dependency_order:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-dependency-order 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    if args.dependency_order:
+        raise ValueError("--require-dependency-order 检查当前顺序，请勿与会重排任务的 --dependency-order 同用")
     return True
 
 
@@ -3357,6 +3388,7 @@ def _process_tasks(
     require_unique_task_names: bool = False,
     required_name_pattern: re.Pattern[str] | None = None,
     require_valid_dependencies: bool = False,
+    require_dependency_order: bool = False,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -3368,6 +3400,11 @@ def _process_tasks(
     dependency_issues_by_task = (
         _dependency_gate_issues_by_task(_effective_tasks_for_name_gate(tasks, dedupe))
         if require_valid_dependencies
+        else {}
+    )
+    dependency_order_issues_by_task = (
+        _dependency_order_gate_issues_by_task(_effective_tasks_for_name_gate(tasks, dedupe))
+        if require_dependency_order
         else {}
     )
     for index, task in enumerate(tasks, start=1):
@@ -3390,6 +3427,13 @@ def _process_tasks(
         dependency_issues = dependency_issues_by_task.get(task.name, [])
         if dependency_issues:
             reason = _dependency_gate_error(task.name, dependency_issues)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        dependency_order_issues = dependency_order_issues_by_task.get(task.name, [])
+        if dependency_order_issues:
+            reason = _dependency_order_gate_error(task.name, dependency_order_issues)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -3496,6 +3540,69 @@ def _has_dependency_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("依赖关系无效" in skipped.reason for skipped in skipped_tasks)
 
 
+def _dependency_order_gate_issues_by_task(tasks: list[TaskSpec]) -> dict[str, list[dict[str, str]]]:
+    grouped: dict[str, list[dict[str, str]]] = {}
+    duplicate_names = set(_duplicate_task_names(tasks))
+    for duplicate_name in duplicate_names:
+        grouped.setdefault(duplicate_name, []).append(
+            {
+                "reason": f"重复任务名，无法判断依赖顺序：{duplicate_name}",
+                "suggestion": "先为重复任务改成唯一 name，再检查依赖顺序。",
+            }
+        )
+    first_index_by_name: dict[str, int] = {}
+    for index, task in enumerate(tasks):
+        first_index_by_name.setdefault(task.name, index)
+    for index, task in enumerate(tasks):
+        for dependency_name in task.depends_on:
+            if dependency_name == task.name:
+                grouped.setdefault(task.name, []).append(
+                    {
+                        "reason": "任务依赖自身，无法满足依赖顺序",
+                        "suggestion": "移除自依赖，或把前置任务拆分成不同 name 后再引用。",
+                    }
+                )
+                continue
+            if dependency_name in duplicate_names:
+                grouped.setdefault(task.name, []).append(
+                    {
+                        "reason": f"依赖引用重复任务名，无法判断顺序：{dependency_name}",
+                        "suggestion": "先为重复任务改成唯一 name，再让 depends_on/dependencies 引用唯一任务名。",
+                    }
+                )
+                continue
+            dependency_index = first_index_by_name.get(dependency_name)
+            if dependency_index is None:
+                grouped.setdefault(task.name, []).append(
+                    {
+                        "reason": f"依赖不存在，无法判断顺序：{dependency_name}",
+                        "suggestion": "补充缺失的依赖任务，或修正 depends_on/dependencies 中的任务名。",
+                    }
+                )
+                continue
+            if dependency_index > index:
+                grouped.setdefault(task.name, []).append(
+                    {
+                        "reason": f"依赖顺序错误：{dependency_name} 位于当前任务之后",
+                        "suggestion": "把依赖任务移动到当前任务之前，或改用 --dependency-order 自动拓扑排序。",
+                    }
+                )
+    return grouped
+
+
+def _dependency_order_gate_error(task_name: str, issues: list[dict[str, str]]) -> str:
+    reason_text = "；".join(issue.get("reason", "") for issue in issues[:3] if issue.get("reason", ""))
+    if len(issues) > 3:
+        reason_text = f"{reason_text}；其余 {len(issues) - 3} 个顺序问题可用 --plan-dependencies 查看"
+    if not reason_text:
+        reason_text = "未知依赖顺序问题"
+    return f"依赖顺序无效：{task_name}；--require-dependency-order 检查失败：{reason_text}"
+
+
+def _has_dependency_order_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("依赖顺序无效" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -3515,6 +3622,8 @@ def _skip_suggestion(reason: str) -> str:
         return "按 --require-name-pattern 指定的团队命名规则调整任务 name，或确认后放宽正则。"
     if "依赖关系无效" in reason:
         return "修正 depends_on/dependencies 中的未知依赖、自依赖、重复任务名或循环依赖；可先运行 --plan-dependencies 查看完整依赖报告。"
+    if "依赖顺序无效" in reason:
+        return "把 depends_on/dependencies 引用的任务移动到当前任务之前；如需自动重排可使用 --dependency-order。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:

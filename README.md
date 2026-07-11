@@ -392,6 +392,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dependenc
 # 依赖合法性主流程门禁：保持原顺序但阻断未知依赖、自依赖、重复名或循环依赖
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-valid-dependencies --report-json dependency_gate_report.json
 
+# 依赖顺序一致性门禁：保持原顺序但要求依赖任务已出现在当前任务之前
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-dependency-order --report-json dependency_order_report.json
+
 # 按任务名稳定排序输出，适合多人维护的大清单审计和结果比对
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --sort-by name
 
@@ -451,6 +454,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 - `--plan-dependencies` 不生成 `/goal` 正文，而是输出按依赖分批的执行计划；发现未知依赖、重复任务名或循环依赖时退出码为 1。
 - `--dependency-order` 会在生成、dry-run、list、lint 或 redaction 前应用依赖拓扑顺序；如果筛选/limit 后导致依赖缺失、循环或重复任务名，会直接失败并提示先运行 `--plan-dependencies` 查看详情。
 - `--require-valid-dependencies` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；它复用依赖计划检查未知依赖、自依赖、重复任务名和循环依赖，不改变原任务顺序，发现问题时跳过对应任务并返回非零退出码，适合希望保留人工排序但仍把依赖图合法性接入 CI 的团队。
+- `--require-dependency-order` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；它不改变原任务顺序，但要求每个 `depends_on`/`dependencies` 引用的任务已经出现在当前任务之前，未知依赖、自依赖、重复任务名或顺序错误都会让相关任务跳过并返回非零退出码，适合保护人工排序或发布步骤顺序。
 
 ### 批量合并补充回答
 
@@ -536,6 +540,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 批量任务依赖计划、未知依赖和循环依赖检查
 - 批量任务依赖顺序生成和检查
 - 批量依赖合法性主流程门禁
+- 批量依赖顺序一致性门禁
 - 批量 JSON 报告、输出目录、输出文件、团队默认值配置
 
 不适合非编码任务、主要依赖人工判断的设计决策，或只需要一次性小改动的场景。
