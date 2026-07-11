@@ -1221,7 +1221,7 @@
 
 | 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 批量依赖合法性主流程门禁 | 现有 `--plan-dependencies` 可以在分析模式中发现未知依赖、重复任务名和循环依赖，`--dependency-order` 会按依赖拓扑重排并在依赖无效时失败；但团队有时希望保持输入顺序或已有排序策略，只是在真实生成、dry-run、check 或 lint-output 前阻断依赖关系无效的任务。当前只能先单独跑 `--plan-dependencies` 或被迫使用会改变顺序的 `--dependency-order`。 | 在 `scripts/batch_generate.py` 新增 `--require-valid-dependencies`，用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前复用依赖计划校验；发现未知依赖、自依赖、重复任务名或循环依赖时跳过对应任务并返回非零退出码，报告保留依赖错误和修复建议，但不改变原任务处理顺序。同步更新 README 与 SKILL。 | 待实现 | - |
+| 1 | 批量依赖合法性主流程门禁 | 现有 `--plan-dependencies` 可以在分析模式中发现未知依赖、重复任务名和循环依赖，`--dependency-order` 会按依赖拓扑重排并在依赖无效时失败；但团队有时希望保持输入顺序或已有排序策略，只是在真实生成、dry-run、check 或 lint-output 前阻断依赖关系无效的任务。当前只能先单独跑 `--plan-dependencies` 或被迫使用会改变顺序的 `--dependency-order`。 | 在 `scripts/batch_generate.py` 新增 `--require-valid-dependencies`，用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前复用依赖计划校验；发现未知依赖、自依赖、重复任务名或循环依赖时跳过对应任务并返回非零退出码，报告保留依赖错误和修复建议，但不改变原任务处理顺序。同步更新 README 与 SKILL。 | 已实现 | 38829b8 |
 
 #### 去重审查
 
@@ -1237,6 +1237,10 @@
 | --- | --- | --- | --- | --- | --- |
 | 批量依赖合法性主流程门禁 | 批量任务已有 depends_on/dependencies，团队希望生成前确认依赖图可执行，但仍保留输入顺序、filter/sort/limit 或人工排序。 | 先跑 `--plan-dependencies` 再人工决定是否继续，或使用 `--dependency-order` 但接受输出顺序被改变；主生成命令本身无法作为依赖合法性门禁。 | 一条命令在主流程中阻断依赖错误任务、返回失败退出码并写入 `--report-json`，无需改变顺序或额外脚本。 | 新增任务图合法性准入门禁，不是依赖计划展示、拓扑排序或名称唯一检查的包装。 | 达标 |
 
+### 本轮总结
+
+修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-valid-dependencies"`、合法依赖清单 `--dry-run --require-valid-dependencies` 通过并写入 `--report-json`、未知依赖/自依赖清单返回失败退出码并断言报告包含“依赖不存在”和“任务依赖自身”、循环依赖清单返回失败退出码并断言报告包含“存在循环依赖”、示例任务清单 `--dry-run --require-valid-dependencies` 通过、坏依赖清单在 `--check`、真实生成和 `--lint-output` 组合下均返回失败退出码并保留依赖错误原因、`--plan-dependencies --require-valid-dependencies` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1245,7 +1249,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 36 轮审查清单已建立，正在实现批量依赖合法性主流程门禁；累计修复 4 个已完成问题，新增 35 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 36 轮已完成，准备进入第 37 轮；累计修复 4 个已完成问题，新增 36 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
@@ -1283,4 +1287,5 @@
 - 第 33 轮：批量任务名称唯一门禁（4131f16）
 - 第 34 轮：批量任务名称正则门禁（6ec2bfe）
 - 第 35 轮：批量任务清单 Schema 门禁（ec2f411）
-剩余风险：`--lint-task-schema` 只检查 JSON/CSV 清单结构、字段名、description 缺失和别名冲突，不判断任务内容是否充分、依赖是否存在或路径是否真实可读；`--require-name-pattern` 只验证名称匹配正则，不判断命名是否语义准确、是否与 Jira/Issue 真实存在或是否符合团队更复杂命名规则；`--require-unique-task-names` 会阻断同名任务，但不会判断名称本身是否准确、稳定或符合团队命名规范；`--require-task-path` 只检查 path/inspect_path/target_path 字段是否存在；`--require-existing-task-path` 只检查路径是否存在，不读取路径内容、不验证是否适合该任务；`--allowed-path-roots` 基于解析后的本地路径做根目录归属判断，不检查路径内容是否符合业务边界，仍需配合 `--inspect-paths` 或人工复核路径有效性；路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；`--require-explicit-fields` 只把任务 `fields` 和 `description` 中的显式字段标签视为显式来源，不把自由散文中的启发式命中算作显式，团队可能需要在清单中统一标注关键字段；`--forbid-default-fields` 依赖现有缺失识别与默认填充列表，只能防止指定字段落到默认值，不能证明描述启发式识别出的字段完全符合业务语义；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
+- 第 36 轮：批量依赖合法性主流程门禁（38829b8）
+剩余风险：`--require-valid-dependencies` 复用任务名构建依赖图，只检查依赖引用、自依赖、重复名和循环依赖，不判断依赖顺序是否符合业务优先级或依赖任务是否已实际完成；`--lint-task-schema` 只检查 JSON/CSV 清单结构、字段名、description 缺失和别名冲突，不判断任务内容是否充分、依赖是否存在或路径是否真实可读；`--require-name-pattern` 只验证名称匹配正则，不判断命名是否语义准确、是否与 Jira/Issue 真实存在或是否符合团队更复杂命名规则；`--require-unique-task-names` 会阻断同名任务，但不会判断名称本身是否准确、稳定或符合团队命名规范；`--require-task-path` 只检查 path/inspect_path/target_path 字段是否存在；`--require-existing-task-path` 只检查路径是否存在，不读取路径内容、不验证是否适合该任务；`--allowed-path-roots` 基于解析后的本地路径做根目录归属判断，不检查路径内容是否符合业务边界，仍需配合 `--inspect-paths` 或人工复核路径有效性；路径扫描、批量路径画像与项目验证命令发现仍基于文件名、后缀和轻量配置规则，无法保证覆盖所有自定义脚本或 monorepo 工具链；批量路径画像和路径建议字段回填依赖任务清单提供真实可读的 path/inspect_path/target_path，描述中自动提取路径可能受命令文本或相对路径歧义影响；路径建议字段回填会用启发式 suggested_fields 替换 description_inferred 来源字段，但仍需要人工复核业务目标、验证命令和边界是否准确；批量依赖计划和依赖顺序生成依赖用户显式填写准确任务名，filter/limit 后可能因缺失前置任务而需要人工调整输入范围；英文识别、上下文合并、字段、单任务画像、批量任务画像和 `/goal` 文件语义质量检查均为启发式规则；`--require-explicit-fields` 只把任务 `fields` 和 `description` 中的显式字段标签视为显式来源，不把自由散文中的启发式命中算作显式，团队可能需要在清单中统一标注关键字段；`--forbid-default-fields` 依赖现有缺失识别与默认填充列表，只能防止指定字段落到默认值，不能证明描述启发式识别出的字段完全符合业务语义；`--max-defaulted-fields` 只能限制默认填充数量，不能判断默认值内容是否真的适合业务场景，且超限时会跳过任务但仍可能写出其他成功任务；`--min-lint-score` 覆盖单任务字段/单个 `/goal` 文件以及批量 `--lint-fields`/`--lint-output`，但暂不覆盖默认值、合集、目录和目录树门禁，且分数本身仍来自启发式语义规则；批量缺失信息追问文案和补充回答合并依赖同一套启发式要素识别，不能替代人工判断任务真实意图，且 `--merge-supplements` 要求补充回答中的任务名与原清单 `name` 精确匹配；`--profile-tasks`、`--fail-on-high-risk` 和 `--fail-on-risk-level` 依赖启发式 `risk_level`，阈值仅支持 low/medium/high 三档，`low` 会阻断所有已画像任务，团队仍需结合发布策略选择合适阈值；`--lint-defaults-json` 会将部分 overrides 与交互默认值合并后检查，如果团队默认值本意是保持通用或依赖运行时上下文，仍需人工策略复核；`--lint-output`、`--lint-goal-bundle`、目录/目录树中的自动合集识别以及 `--lint-goal-path` 都复用最终 `/goal` 语义质量启发式规则，可能仍需人工复核得分边界和团队特定标准；合集识别依赖标准开始/结束分隔线、`.txt` 扩展名和分隔线数量判断，不识别非标准分隔符、二进制/富文本合集或隐藏在非 `.txt` 文件中的目标块；`--lint-goal-path` 对目录默认执行递归目录树检查，若用户只想检查直属 `.txt` 文件仍需显式使用 `--lint-goal-dir`；`--lint-goal-tree` 与 `--lint-goal-path` 的目录模式只识别 `.txt` 扩展名、不跟随符号链接，并会按内置跳过目录忽略依赖、缓存和构建产物；敏感信息审计无法识别所有私有格式或业务敏感词，复杂长句、领域缩写、多意图补充、手工大幅改写的 `/goal` 概述或团队特定质量标准可能需要人工复核。生成最终 `/goal` 前仍需用户或执行者复核真实项目命令、业务目标、任务关系、合并字段、画像结论、脱敏结论和质量门禁结论。
