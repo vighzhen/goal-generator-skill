@@ -150,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         require_unique_task_names = _require_unique_task_names_from_args(args)
         required_name_pattern = _required_name_pattern_from_args(args)
         require_valid_dependencies = _require_valid_dependencies_from_args(args)
+        no_overwrite = _no_overwrite_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -250,6 +251,17 @@ def main(argv: list[str] | None = None) -> int:
         required_name_pattern,
         require_valid_dependencies,
     )
+    try:
+        _ensure_no_overwrite_targets(
+            outputs,
+            args.output_dir,
+            args.output_file,
+            args.report_json,
+            no_overwrite,
+        )
+    except ValueError as error:
+        print(f"输出保护失败：{error}", file=sys.stderr)
+        return 1
     output_lint_report = None
     if args.lint_output:
         if dry_run:
@@ -391,6 +403,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--require-valid-dependencies",
         action="store_true",
         help="真实生成、dry-run、check 或 lint-output 时要求 depends_on/dependencies 依赖图合法但不改变任务顺序。",
+    )
+    parser.add_argument(
+        "--no-overwrite",
+        action="store_true",
+        help="写入 --output-file、--output-dir 目标文件或 --report-json 前要求目标不存在，避免覆盖已有批量产物。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -623,6 +640,26 @@ def _require_valid_dependencies_from_args(args: argparse.Namespace) -> bool:
         or args.list_tasks
     ):
         raise ValueError("--require-valid-dependencies 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
+
+
+def _no_overwrite_from_args(args: argparse.Namespace) -> bool:
+    if not args.no_overwrite:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--no-overwrite 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return True
 
 
@@ -3665,6 +3702,68 @@ def _write_outputs(
     if summary_only:
         return
     print(TASK_SEPARATOR.join(output.content for output in outputs))
+
+
+def _ensure_no_overwrite_targets(
+    outputs: list[TaskOutput],
+    output_dir: str | None,
+    output_file: str | None,
+    report_json: str | None,
+    no_overwrite: bool,
+) -> None:
+    if not no_overwrite:
+        return
+    targets = _no_overwrite_target_entries(outputs, output_dir, output_file, report_json)
+    problems: list[str] = []
+    duplicate_targets = _duplicate_output_targets(targets)
+    if duplicate_targets:
+        problems.append("多个输出目标指向同一路径：" + "；".join(duplicate_targets))
+    existing_targets = _existing_output_targets(targets)
+    if existing_targets:
+        problems.append("目标已存在：" + "；".join(existing_targets))
+    if output_dir:
+        output_dir_path = Path(output_dir)
+        if output_dir_path.exists() and not output_dir_path.is_dir():
+            problems.append(f"--output-dir 目标已存在但不是目录：{output_dir_path}")
+    if problems:
+        raise ValueError("；".join(problems) + "。请更换输出路径、删除旧文件，或移除 --no-overwrite 后明确允许覆盖。")
+
+
+def _no_overwrite_target_entries(
+    outputs: list[TaskOutput],
+    output_dir: str | None,
+    output_file: str | None,
+    report_json: str | None,
+) -> list[tuple[str, Path]]:
+    targets: list[tuple[str, Path]] = []
+    if output_file:
+        targets.append(("--output-file", Path(output_file)))
+    if output_dir:
+        output_dir_path = Path(output_dir)
+        for output in outputs:
+            filename = f"{output.file_slug}{GOAL_FILE_SUFFIX}"
+            targets.append((f"--output-dir/{filename}", output_dir_path / filename))
+    if report_json:
+        targets.append(("--report-json", Path(report_json)))
+    return targets
+
+
+def _duplicate_output_targets(targets: list[tuple[str, Path]]) -> list[str]:
+    by_path: dict[Path, list[str]] = {}
+    for label, path in targets:
+        by_path.setdefault(path.expanduser().resolve(strict=False), []).append(label)
+    duplicates: list[str] = []
+    for path, labels in by_path.items():
+        if len(labels) > 1:
+            duplicates.append(f"{' 和 '.join(labels)} -> {path}")
+    return duplicates
+
+
+def _existing_output_targets(targets: list[tuple[str, Path]]) -> list[str]:
+    existing = [f"{label} {path}" for label, path in targets if path.exists()]
+    if len(existing) > 10:
+        return [*existing[:10], f"其余 {len(existing) - 10} 个目标也已存在"]
+    return existing
 
 
 def _write_output_dir(outputs: list[TaskOutput], output_dir: Path) -> None:

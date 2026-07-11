@@ -397,6 +397,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 
 # 所有任务写入同一个文件
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
+
+# 输出覆盖保护：目标正文文件、输出目录内将生成的 .txt 或 JSON 报告已存在时失败且不写入
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/ --report-json batch_report.json --no-overwrite
 ```
 
 说明：
@@ -407,6 +410,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1；`--enrich-from-paths` 会把路径画像中的 `suggested_fields` 回填到缺失或仅由描述启发式推断的 6 要素，不覆盖用户显式填写的字段。
 - `--lint-task-schema` 不生成 `/goal` 正文，而是直接检查原始 JSON/CSV 任务清单结构；会报告未知任务字段、未知 `fields` 6 要素、非对象 `fields`、CSV 未知或重复表头、`description` 缺失或为空、`path`/`inspect_path`/`target_path` 以及 `depends_on`/`dependencies` 别名冲突等问题，任一问题都会返回非零退出码，并可配合 `--output-file`、`--summary-only` 和 `--report-json` 接入 CI。
 - `--output-dir` 和 `--output-file` 互斥。
+- `--no-overwrite` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 的批量输出写入前保护；如果 `--output-file`、`--output-dir` 内本次将生成的 `.txt` 文件或 `--report-json` 已存在，或多个输出目标指向同一路径，命令会在写入任何输出文件前失败，适合 CI 和多人协作中保护历史交付物。该门禁不用于 `--questions`、`--profile-tasks`、`--lint-task-schema` 等分析模式。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--require-unique-task-names` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；同名任务会全部跳过并返回非零退出码，适合依赖计划、补充回答合并或人工审计前确保任务身份唯一。
 - `--require-name-pattern <regex>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务名不匹配给定 Python 正则时会跳过并返回非零退出码，适合把 Jira/Issue 编号、模块前缀或团队命名规范接入批量生成门禁。
@@ -503,6 +507,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
 - 批量任务清单 Schema 门禁（未知字段、重复表头、description 缺失和别名冲突）
+- 批量输出覆盖保护门禁
 - 团队默认值 JSON 语义质量门禁
 - 批量任务 6 要素字段语义质量门禁
 - 批量生成后最终 `/goal` 输出自检门禁
