@@ -332,6 +332,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 路径根目录白名单门禁：每个任务路径必须位于 scripts/ 或 src/ 之内
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --allowed-path-roots scripts,src --report-json batch_report.json
 
+# 路径画像可读性门禁：每个任务路径必须能成功扫描出代码上下文
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-path-inspection --report-json path_gate_report.json
+
 # 默认填充数量门禁：每个任务最多允许默认填充 2 个要素，超限任务会跳过并返回非零退出码
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-defaulted-fields 2 --report-json batch_report.json
 
@@ -438,6 +441,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 - `--require-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；没有 `path`、`inspect_path` 或 `target_path` 的任务会跳过并让命令返回非零退出码，适合要求批量任务全部绑定代码上下文锚点的团队。
 - `--require-existing-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务缺少路径字段或路径不存在时会跳过并返回非零退出码，适合生成前确保批量任务路径锚点在当前仓库中真实可访问。
 - `--allowed-path-roots <根目录列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务路径必须位于任一允许根目录内，根目录列表用逗号、分号、顿号或换行分隔。该门禁会要求任务提供路径字段，但不单独检查路径存在性；如需同时检查存在性可配合 `--require-existing-task-path`。
+- `--require-path-inspection` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务必须显式提供 `path`/`inspect_path`/`target_path`，且该路径要能被路径画像扫描出至少 1 个可用文件，否则任务会跳过并返回非零退出码。它不回填字段；如需查看完整上下文或生成建议字段，继续使用 `--inspect-paths` 或 `--enrich-from-paths`。
 - `--max-defaulted-fields <0-6>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；当某任务默认填充数量超过阈值时，该任务会跳过并让命令返回非零退出码，适合在完全 `--strict` 前做渐进式质量门禁。
 - `--min-description-length <N>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务原始 `description` 去除首尾空白后必须至少达到 N 个字符，否则会跳过并返回非零退出码，适合阻断“优化”“修 bug”这类信息量过低但非空的批量需求。
 - `--require-explicit-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，多个字段用逗号、分号、顿号或换行分隔。被要求的字段必须来自任务 `fields` 或 `description` 中的显式标签，不能只靠描述启发式推断或默认值兜底。
@@ -541,6 +545,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 批量任务 6 要素字段语义质量门禁
 - 批量生成后最终 `/goal` 输出自检门禁
 - 批量任务路径上下文画像、项目验证命令和风险线索汇总
+- 批量主流程路径画像可读性门禁
 - 批量路径建议字段回填为可生成任务 JSON
 - 批量任务依赖计划、未知依赖和循环依赖检查
 - 批量任务依赖顺序生成和检查

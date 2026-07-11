@@ -152,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         require_task_path = _require_task_path_from_args(args)
         require_existing_task_path = _require_existing_task_path_from_args(args)
         allowed_path_roots = _allowed_path_roots_from_args(args)
+        require_path_inspection = _require_path_inspection_from_args(args)
         require_unique_task_names = _require_unique_task_names_from_args(args)
         required_name_pattern = _required_name_pattern_from_args(args)
         require_valid_dependencies = _require_valid_dependencies_from_args(args)
@@ -261,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         require_task_path,
         require_existing_task_path,
         allowed_path_roots,
+        require_path_inspection,
         require_unique_task_names,
         required_name_pattern,
         require_valid_dependencies,
@@ -333,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     if require_existing_task_path and (_has_required_path_skips(skipped_tasks) or _has_missing_existing_path_skips(skipped_tasks)):
         return 1
     if allowed_path_roots and (_has_required_path_skips(skipped_tasks) or _has_allowed_path_root_skips(skipped_tasks)):
+        return 1
+    if require_path_inspection and _has_path_inspection_gate_skips(skipped_tasks):
         return 1
     if require_unique_task_names and _has_duplicate_name_skips(skipped_tasks):
         return 1
@@ -422,6 +426,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allowed-path-roots",
         help="真实生成、dry-run、check 或 lint-output 时要求任务路径位于指定根目录内，多个根目录用逗号分隔。",
+    )
+    parser.add_argument(
+        "--require-path-inspection",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求任务路径可被路径画像成功扫描。",
     )
     parser.add_argument(
         "--require-unique-task-names",
@@ -683,6 +692,26 @@ def _allowed_path_roots_from_args(args: argparse.Namespace) -> list[Path]:
     if not roots:
         raise ValueError("--allowed-path-roots 必须包含至少一个路径根目录")
     return roots
+
+
+def _require_path_inspection_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_path_inspection:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-path-inspection 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
 
 
 def _require_unique_task_names_from_args(args: argparse.Namespace) -> bool:
@@ -3416,6 +3445,7 @@ def _process_tasks(
     require_task_path: bool = False,
     require_existing_task_path: bool = False,
     allowed_path_roots: list[Path] | None = None,
+    require_path_inspection: bool = False,
     require_unique_task_names: bool = False,
     required_name_pattern: re.Pattern[str] | None = None,
     require_valid_dependencies: bool = False,
@@ -3472,6 +3502,13 @@ def _process_tasks(
         task_risk_issue = _task_risk_gate_issue(task, task_risk_threshold)
         if task_risk_issue:
             reason = _task_risk_gate_error(task.name, task_risk_threshold, task_risk_issue)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        path_inspection_issue = _path_inspection_gate_issue(task, require_path_inspection)
+        if path_inspection_issue:
+            reason = _path_inspection_gate_error(task.name, path_inspection_issue)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -3685,6 +3722,44 @@ def _has_task_risk_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("任务风险等级超限" in skipped.reason for skipped in skipped_tasks)
 
 
+def _path_inspection_gate_issue(task: TaskSpec, require_path_inspection: bool) -> dict[str, object] | None:
+    if not require_path_inspection or task.load_error:
+        return None
+    if not task.inspect_path:
+        return {
+            "path": "",
+            "reason": "缺少 path/inspect_path/target_path，无法执行路径画像",
+            "suggestion": "为该任务补充 path、inspect_path 或 target_path，指向本地文件或目录。",
+        }
+    try:
+        context = inspect_path_context(task.inspect_path, task.description)
+    except (OSError, ValueError) as error:
+        return {
+            "path": task.inspect_path,
+            "reason": str(error),
+            "suggestion": "确认路径存在、可读且位于预期仓库范围内，必要时改成更具体的文件或目录。",
+        }
+    file_count = int(context.get("file_count", 0))
+    if file_count <= 0:
+        return {
+            "path": task.inspect_path,
+            "reason": "路径画像没有发现可用文件",
+            "suggestion": "确认目录不为空，或把任务路径改成包含源代码、测试或文档的文件/目录。",
+        }
+    return None
+
+
+def _path_inspection_gate_error(task_name: str, issue: dict[str, object]) -> str:
+    path_value = str(issue.get("path", ""))
+    path_label = path_value or "未提供"
+    reason = str(issue.get("reason", "未知路径画像问题"))
+    return f"任务路径画像失败：{task_name}；--require-path-inspection 检查路径 {path_label} 未通过：{reason}"
+
+
+def _has_path_inspection_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("任务路径画像失败" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -3714,6 +3789,8 @@ def _skip_suggestion(reason: str) -> str:
         return "扩写任务 description，补充目标、范围、验证方式、约束或受阻条件等关键上下文。"
     if "任务风险等级超限" in reason:
         return "先运行 --profile-tasks 查看完整风险画像，拆分高风险任务、补充约束和验证面，或确认后调整 --fail-on-task-risk-level 阈值。"
+    if "任务路径画像失败" in reason:
+        return "先运行 --inspect-paths 查看完整路径画像错误，修正 path/inspect_path/target_path 后再生成。"
     if "禁止默认兜底要素" in reason:
         return "在任务 fields 中填写这些要素，或在 description 中补充可被识别的明确字段内容。"
     if "缺少显式要素" in reason:
