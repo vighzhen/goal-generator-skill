@@ -48,7 +48,23 @@ FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "blocked": ("受阻", "阻塞", "停下", "问人", "问我", "跳过", "无法", "缺少"),
 }
 SUPPLEMENT_TEXT_FIELDS: tuple[str, ...] = ("supplement", "answer", "response", "text", "description")
-
+TASK_SCHEMA_PATH_KEYS: tuple[str, ...] = ("path", "inspect_path", "target_path")
+TASK_SCHEMA_DEPENDENCY_KEYS: tuple[str, ...] = ("depends_on", "dependencies")
+TASK_SCHEMA_ALLOWED_KEYS: tuple[str, ...] = (
+    "name",
+    "description",
+    "fields",
+    *TASK_SCHEMA_PATH_KEYS,
+    *TASK_SCHEMA_DEPENDENCY_KEYS,
+)
+CSV_TASK_SCHEMA_ALLOWED_HEADERS: tuple[str, ...] = (
+    "name",
+    "description",
+    *TASK_SCHEMA_PATH_KEYS,
+    *TASK_SCHEMA_DEPENDENCY_KEYS,
+    *ELEMENT_ORDER,
+)
+TASK_SCHEMA_SCALAR_KEYS: tuple[str, ...] = ("name", "description", *TASK_SCHEMA_PATH_KEYS)
 
 
 @dataclass(frozen=True)
@@ -96,6 +112,15 @@ class SkippedTask:
 
 
 @dataclass(frozen=True)
+class TaskSchemaIssue:
+    task_index: int
+    field: str
+    severity: str
+    message: str
+    suggestion: str
+
+
+@dataclass(frozen=True)
 class BatchStats:
     success_count: int
     skipped_count: int
@@ -139,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             try:
                 return _run_lint_defaults_mode(args, start_time)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                print(f"读取输入失败：{error}", file=sys.stderr)
+                return 1
+        if args.lint_task_schema:
+            try:
+                return _run_task_schema_lint_mode(args, start_time)
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 print(f"读取输入失败：{error}", file=sys.stderr)
                 return 1
@@ -288,6 +319,7 @@ def _build_parser() -> argparse.ArgumentParser:
     output_group.add_argument("--output-file", help="输出到单个文件。")
     parser.add_argument("--defaults-json", help="JSON 默认值文件，用于覆盖缺失 6 要素的默认填充。")
     parser.add_argument("--lint-defaults-json", help="检查团队默认值 JSON 合并后的 6 要素语义质量，不需要任务输入。")
+    parser.add_argument("--lint-task-schema", action="store_true", help="检查批量 JSON/CSV 任务清单字段结构、未知字段和别名冲突，不生成 /goal。")
     parser.add_argument("--report-json", help="把批量处理结果、缺失要素和跳过原因写入 JSON 报告。")
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
@@ -387,6 +419,7 @@ def _max_defaulted_fields_from_args(args: argparse.Namespace) -> int | None:
         raise ValueError(f"--max-defaulted-fields 必须是 0 到 {len(ELEMENT_ORDER)} 之间的整数")
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -407,6 +440,7 @@ def _required_explicit_fields_from_args(args: argparse.Namespace) -> list[str]:
         return []
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -427,6 +461,7 @@ def _forbidden_default_fields_from_args(args: argparse.Namespace) -> list[str]:
         return []
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -446,6 +481,7 @@ def _require_task_path_from_args(args: argparse.Namespace) -> bool:
         return False
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -465,6 +501,7 @@ def _require_existing_task_path_from_args(args: argparse.Namespace) -> bool:
         return False
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -485,6 +522,7 @@ def _allowed_path_roots_from_args(args: argparse.Namespace) -> list[Path]:
         return []
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -518,6 +556,7 @@ def _require_unique_task_names_from_args(args: argparse.Namespace) -> bool:
         return False
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -538,6 +577,7 @@ def _required_name_pattern_from_args(args: argparse.Namespace) -> re.Pattern[str
         return None
     if (
         args.lint_defaults_json
+        or args.lint_task_schema
         or args.merge_supplements
         or args.questions
         or args.profile_tasks
@@ -704,6 +744,412 @@ def _run_lint_defaults_mode(args: argparse.Namespace, start_time: float) -> int:
         _write_defaults_lint_report(lint_report, elapsed_seconds, Path(args.report_json))
     print(_format_defaults_lint_summary(lint_report, elapsed_seconds))
     return 0 if lint_report["passed"] else 1
+
+
+def _run_task_schema_lint_mode(args: argparse.Namespace, start_time: float) -> int:
+    if args.output_dir:
+        print("--lint-task-schema 不支持 --output-dir，请使用 --output-file 写入检查报告。", file=sys.stderr)
+        return 1
+    if args.lint_output:
+        print("--lint-task-schema 不生成 /goal，请勿与 --lint-output 同用。", file=sys.stderr)
+        return 1
+    schema_report = _lint_task_schema_file(Path(_input_value_from_args(args)))
+    schema_text = _format_task_schema_report(schema_report)
+    summary_only = args.summary_only or args.check
+    if args.output_file:
+        _write_text_file(schema_text, Path(args.output_file))
+    elif not summary_only:
+        print(schema_text)
+    elapsed_seconds = time.perf_counter() - start_time
+    if args.report_json:
+        _write_task_schema_lint_report(schema_report, elapsed_seconds, Path(args.report_json))
+    print(_format_task_schema_summary(schema_report, elapsed_seconds))
+    return 0 if schema_report["valid"] else 1
+
+
+def _lint_task_schema_file(input_path: Path) -> dict[str, object]:
+    suffix = input_path.suffix.lower()
+    if suffix == ".json":
+        return _lint_json_task_schema(input_path)
+    if suffix == ".csv":
+        return _lint_csv_task_schema(input_path)
+    supported = "、".join(SUPPORTED_SUFFIXES)
+    raise ValueError(f"--lint-task-schema 不支持的输入格式：{suffix}，仅支持 {supported}")
+
+
+def _lint_json_task_schema(input_path: Path) -> dict[str, object]:
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        issue = TaskSchemaIssue(
+            0,
+            "root",
+            "high",
+            "JSON 顶层必须是任务数组",
+            "把输入改成由任务对象组成的数组，例如 [{\"name\": \"任务\", \"description\": \"...\"}]。",
+        )
+        return _task_schema_report(input_path, "json", 0, [issue])
+    issues: list[TaskSchemaIssue] = []
+    if not data:
+        issues.append(
+            TaskSchemaIssue(
+                0,
+                "root",
+                "high",
+                "JSON 任务数组为空",
+                "至少提供一个包含 name、description 和可选 fields/path/depends_on 的任务对象。",
+            )
+        )
+    for index, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            issues.append(
+                TaskSchemaIssue(
+                    index,
+                    "task",
+                    "high",
+                    "JSON 任务必须是对象",
+                    "把该条任务改成包含 name、description、fields 等字段的对象。",
+                )
+            )
+            continue
+        issues.extend(_json_task_schema_issues(index, item))
+    return _task_schema_report(input_path, "json", len(data), issues)
+
+
+def _json_task_schema_issues(index: int, item: dict[str, Any]) -> list[TaskSchemaIssue]:
+    issues: list[TaskSchemaIssue] = []
+    issues.extend(_unknown_json_task_field_issues(index, item))
+    issues.extend(_json_scalar_field_issues(index, item))
+    issues.extend(_json_fields_object_issues(index, item.get("fields")) if "fields" in item else [])
+    issues.extend(_json_dependency_field_issues(index, item))
+    issues.extend(_alias_conflict_issues(index, item, TASK_SCHEMA_PATH_KEYS, "任务路径别名"))
+    issues.extend(_alias_conflict_issues(index, item, TASK_SCHEMA_DEPENDENCY_KEYS, "依赖别名"))
+    if not _string_value(item.get("description")):
+        issues.append(
+            TaskSchemaIssue(
+                index,
+                "description",
+                "high",
+                "缺少或为空 description",
+                "为该任务补充 description；主生成流程需要 description 才能分析和生成 /goal。",
+            )
+        )
+    return issues
+
+
+def _unknown_json_task_field_issues(index: int, item: dict[str, Any]) -> list[TaskSchemaIssue]:
+    allowed = set(TASK_SCHEMA_ALLOWED_KEYS)
+    supported = "、".join(TASK_SCHEMA_ALLOWED_KEYS)
+    return [
+        TaskSchemaIssue(
+            index,
+            str(key),
+            "high",
+            f"未知任务字段：{key}",
+            f"确认是否拼写错误；批量 JSON 任务仅支持：{supported}。",
+        )
+        for key in sorted(str(raw_key) for raw_key in item if str(raw_key) not in allowed)
+    ]
+
+
+def _json_scalar_field_issues(index: int, item: dict[str, Any]) -> list[TaskSchemaIssue]:
+    issues: list[TaskSchemaIssue] = []
+    for key in TASK_SCHEMA_SCALAR_KEYS:
+        if key in item and not _is_schema_scalar_value(item.get(key)):
+            issues.append(
+                TaskSchemaIssue(
+                    index,
+                    key,
+                    "high",
+                    f"{key} 必须是字符串或可转成字符串的标量",
+                    f"把 {key} 改成单个字符串；复杂对象请放入 description 或 fields 中的文本。",
+                )
+            )
+    return issues
+
+
+def _json_fields_object_issues(index: int, raw_fields: Any) -> list[TaskSchemaIssue]:
+    if not isinstance(raw_fields, dict):
+        return [
+            TaskSchemaIssue(
+                index,
+                "fields",
+                "high",
+                "fields 必须是对象",
+                "把 fields 改成包含 outcome、verification、constraints、boundaries、iteration、blocked 的对象。",
+            )
+        ]
+    issues: list[TaskSchemaIssue] = []
+    supported = "、".join(ELEMENT_ORDER)
+    for raw_key, value in raw_fields.items():
+        key = str(raw_key)
+        field_name = f"fields.{key}"
+        if key not in ELEMENT_ORDER:
+            issues.append(
+                TaskSchemaIssue(
+                    index,
+                    field_name,
+                    "high",
+                    f"未知 6 要素字段：{key}",
+                    f"确认字段名是否拼写错误；fields 仅支持：{supported}。",
+                )
+            )
+            continue
+        if not _is_schema_scalar_value(value):
+            issues.append(
+                TaskSchemaIssue(
+                    index,
+                    field_name,
+                    "high",
+                    f"{field_name} 必须是字符串或可转成字符串的标量",
+                    "把该 6 要素值改成一段可直接写入 /goal 的文本。",
+                )
+            )
+    return issues
+
+
+def _json_dependency_field_issues(index: int, item: dict[str, Any]) -> list[TaskSchemaIssue]:
+    issues: list[TaskSchemaIssue] = []
+    for key in TASK_SCHEMA_DEPENDENCY_KEYS:
+        if key in item and not _is_schema_dependency_value(item.get(key)):
+            issues.append(
+                TaskSchemaIssue(
+                    index,
+                    key,
+                    "high",
+                    f"{key} 必须是字符串、标量或标量数组",
+                    f"把 {key} 改成任务名字符串、用分隔符连接的字符串，或任务名数组。",
+                )
+            )
+    return issues
+
+
+def _lint_csv_task_schema(input_path: Path) -> dict[str, object]:
+    issues: list[TaskSchemaIssue] = []
+    with input_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        fieldnames = reader.fieldnames or []
+        if not fieldnames:
+            issue = TaskSchemaIssue(0, "header", "high", "CSV 文件缺少表头", "补充 name、description 等表头后重试。")
+            return _task_schema_report(input_path, "csv", 0, [issue])
+        issues.extend(_csv_header_schema_issues(fieldnames))
+        task_count = 0
+        for task_count, row in enumerate(reader, start=1):
+            issues.extend(_csv_row_schema_issues(task_count, row))
+    if task_count == 0:
+        issues.append(
+            TaskSchemaIssue(
+                0,
+                "rows",
+                "high",
+                "CSV 文件没有任务行",
+                "至少提供一行任务数据，并填写 description。",
+            )
+        )
+    return _task_schema_report(input_path, "csv", task_count, issues)
+
+
+def _csv_header_schema_issues(fieldnames: list[str]) -> list[TaskSchemaIssue]:
+    issues: list[TaskSchemaIssue] = []
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    allowed = set(CSV_TASK_SCHEMA_ALLOWED_HEADERS)
+    supported = "、".join(CSV_TASK_SCHEMA_ALLOWED_HEADERS)
+    for raw_fieldname in fieldnames:
+        fieldname = _string_value(raw_fieldname)
+        if not fieldname:
+            issues.append(
+                TaskSchemaIssue(
+                    0,
+                    "header",
+                    "high",
+                    "CSV 存在空表头",
+                    "删除空列，或把表头改成受支持字段名。",
+                )
+            )
+            continue
+        if fieldname in seen:
+            duplicates.add(fieldname)
+        seen.add(fieldname)
+        if fieldname not in allowed:
+            issues.append(
+                TaskSchemaIssue(
+                    0,
+                    fieldname,
+                    "high",
+                    f"未知 CSV 表头：{fieldname}",
+                    f"确认是否拼写错误；CSV 仅支持：{supported}。",
+                )
+            )
+    for fieldname in sorted(duplicates):
+        issues.append(
+            TaskSchemaIssue(
+                0,
+                fieldname,
+                "high",
+                f"CSV 表头重复：{fieldname}",
+                "删除重复列，避免 csv.DictReader 覆盖同名字段值。",
+            )
+        )
+    return issues
+
+
+def _csv_row_schema_issues(index: int, row: dict[str, str | None]) -> list[TaskSchemaIssue]:
+    issues: list[TaskSchemaIssue] = []
+    if row.get(None):
+        issues.append(
+            TaskSchemaIssue(
+                index,
+                "row",
+                "high",
+                "CSV 行列数超过表头数量",
+                "检查该行是否存在未转义逗号、缺失引号或多余列。",
+            )
+        )
+    if not _string_value(row.get("description")):
+        issues.append(
+            TaskSchemaIssue(
+                index,
+                "description",
+                "high",
+                "缺少或为空 description",
+                "为该任务补充 description；主生成流程需要 description 才能分析和生成 /goal。",
+            )
+        )
+    issues.extend(_alias_conflict_issues(index, row, TASK_SCHEMA_PATH_KEYS, "任务路径别名"))
+    issues.extend(_alias_conflict_issues(index, row, TASK_SCHEMA_DEPENDENCY_KEYS, "依赖别名"))
+    return issues
+
+
+def _alias_conflict_issues(
+    index: int,
+    item: dict[Any, Any],
+    aliases: tuple[str, ...],
+    label: str,
+) -> list[TaskSchemaIssue]:
+    values = {
+        alias: _schema_alias_value(item.get(alias), aliases)
+        for alias in aliases
+        if alias in item and _schema_alias_value(item.get(alias), aliases)
+    }
+    if len(set(values.values())) <= 1:
+        return []
+    alias_text = "、".join(f"{alias}={value}" for alias, value in values.items())
+    preferred = aliases[0]
+    return [
+        TaskSchemaIssue(
+            index,
+            "/".join(aliases),
+            "high",
+            f"{label}存在冲突：{alias_text}",
+            f"只保留一个别名或确保这些别名取值一致；推荐统一使用 {preferred}。",
+        )
+    ]
+
+
+def _schema_alias_value(value: Any, aliases: tuple[str, ...]) -> str:
+    if aliases == TASK_SCHEMA_DEPENDENCY_KEYS:
+        return "|".join(_dependency_names(value))
+    if isinstance(value, list):
+        return "|".join(_string_value(item) for item in value if _string_value(item))
+    return _string_value(value)
+
+
+def _is_schema_scalar_value(value: Any) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _is_schema_dependency_value(value: Any) -> bool:
+    if _is_schema_scalar_value(value):
+        return True
+    if isinstance(value, list):
+        return all(_is_schema_scalar_value(item) for item in value)
+    return False
+
+
+def _task_schema_report(
+    input_path: Path,
+    source_format: str,
+    task_count: int,
+    issues: list[TaskSchemaIssue],
+) -> dict[str, object]:
+    failed_task_indexes = sorted({issue.task_index for issue in issues if issue.task_index > 0})
+    return {
+        "valid": not issues,
+        "source": str(input_path),
+        "format": source_format,
+        "task_count": task_count,
+        "passed_task_count": max(0, task_count - len(failed_task_indexes)),
+        "failed_task_count": len(failed_task_indexes),
+        "issue_count": len(issues),
+        "issues": [_task_schema_issue_report(issue) for issue in issues],
+        "summary": _task_schema_report_summary(task_count, issues, failed_task_indexes),
+    }
+
+
+def _task_schema_issue_report(issue: TaskSchemaIssue) -> dict[str, object]:
+    return {
+        "task_index": issue.task_index,
+        "field": issue.field,
+        "severity": issue.severity,
+        "message": issue.message,
+        "suggestion": issue.suggestion,
+    }
+
+
+def _task_schema_report_summary(
+    task_count: int,
+    issues: list[TaskSchemaIssue],
+    failed_task_indexes: list[int],
+) -> str:
+    if not issues:
+        return f"任务清单 Schema 检查通过：任务 {task_count} 个。"
+    return (
+        "任务清单 Schema 检查未通过："
+        f"任务 {task_count} 个，问题 {len(issues)} 个，"
+        f"涉及任务 {len(failed_task_indexes)} 个。"
+    )
+
+
+def _format_task_schema_report(schema_report: dict[str, object]) -> str:
+    lines = ["批量任务清单 Schema 检查：", str(schema_report.get("summary", ""))]
+    issues = schema_report.get("issues", [])
+    if not isinstance(issues, list) or not issues:
+        return "\n".join(lines)
+    lines.append("")
+    for issue in issues[:20]:
+        if isinstance(issue, dict):
+            lines.append(_format_task_schema_issue_line(issue))
+    if len(issues) > 20:
+        lines.append(f"- 其余 {len(issues) - 20} 个问题请查看 --report-json。")
+    return "\n".join(lines)
+
+
+def _format_task_schema_issue_line(issue: dict[str, object]) -> str:
+    task_index = int(issue.get("task_index", 0))
+    location = "文件级" if task_index <= 0 else f"第 {task_index} 个任务"
+    return (
+        f"- {location} / {issue.get('field', 'unknown')}："
+        f"{issue.get('message', '')}；建议：{issue.get('suggestion', '')}"
+    )
+
+
+def _write_task_schema_lint_report(
+    schema_report: dict[str, object],
+    elapsed_seconds: float,
+    report_path: Path,
+) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "success_count": schema_report.get("passed_task_count", 0),
+        "skipped_count": schema_report.get("failed_task_count", 0),
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "task_schema_lint": schema_report,
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _format_task_schema_summary(schema_report: dict[str, object], elapsed_seconds: float) -> str:
+    return f"{schema_report.get('summary', '任务清单 Schema 检查完成')} 总耗时 {elapsed_seconds:.2f} 秒。"
 
 
 def _lint_defaults_json_file(defaults_file: str) -> dict[str, object]:

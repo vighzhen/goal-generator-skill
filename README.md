@@ -299,6 +299,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --enrich-fr
 # 从 CSV 批量分析，适合用表格工具编辑后检查
 python3 scripts/batch_generate.py --input examples/sample_tasks.csv --dry-run
 
+# 任务清单 Schema 门禁：检查 JSON/CSV 字段、表头、fields 对象和别名冲突
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --lint-task-schema --report-json task_schema_report.json
+
 # 按任务生成可直接发送给需求方的缺失要素追问文案
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --questions --output-file batch_questions.txt
 
@@ -399,6 +402,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-fi
 - 当前批量输入只支持 JSON 和 CSV，其他格式不再作为核心能力维护。
 - JSON 任务可选 `depends_on` 或 `dependencies` 字段；CSV 可选 `depends_on` 或 `dependencies` 表头，多个依赖用逗号、分号、顿号或换行分隔。
 - JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1；`--enrich-from-paths` 会把路径画像中的 `suggested_fields` 回填到缺失或仅由描述启发式推断的 6 要素，不覆盖用户显式填写的字段。
+- `--lint-task-schema` 不生成 `/goal` 正文，而是直接检查原始 JSON/CSV 任务清单结构；会报告未知任务字段、未知 `fields` 6 要素、非对象 `fields`、CSV 未知或重复表头、`description` 缺失或为空、`path`/`inspect_path`/`target_path` 以及 `depends_on`/`dependencies` 别名冲突等问题，任一问题都会返回非零退出码，并可配合 `--output-file`、`--summary-only` 和 `--report-json` 接入 CI。
 - `--output-dir` 和 `--output-file` 互斥。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--require-unique-task-names` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；同名任务会全部跳过并返回非零退出码，适合依赖计划、补充回答合并或人工审计前确保任务身份唯一。
@@ -494,6 +498,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
+- 批量任务清单 Schema 门禁（未知字段、重复表头、description 缺失和别名冲突）
 - 团队默认值 JSON 语义质量门禁
 - 批量任务 6 要素字段语义质量门禁
 - 批量生成后最终 `/goal` 输出自检门禁
