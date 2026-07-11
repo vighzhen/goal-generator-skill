@@ -1482,6 +1482,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help` 断言包含 `--fail-on-task-risk-level`、低风险清单 `--dry-run --fail-on-task-risk-level medium` 通过、混合清单 `--dry-run --fail-on-task-risk-level medium --report-json` 返回失败并断言“任务风险等级超限”和风险任务报告、`--check`/真实生成/`--lint-output` 均在风险任务命中时返回非零并保留跳过原因、`--profile-tasks --fail-on-task-risk-level medium` 与 `--list-tasks --fail-on-task-risk-level medium` 无效组合返回参数错误、非法风险阈值选择返回 argparse 错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+
+## 第 44 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 44 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 4269 行 sha256 9d8f7ad11856cdce、SKILL.md 144 行 sha256 eea2708a842004c1、README.md 551 行 sha256 50d40df0644f7e93、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 43 轮主流程风险阈值门禁、路径存在门禁、路径画像和路径建议字段回填流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量主流程路径画像可读性门禁 | `--require-existing-task-path` 只能证明路径存在，`--inspect-paths` 只能在单独分析模式中发现路径不可读、空目录或扫描失败；真实生成、`--dry-run`、`--check` 或 `--lint-output` 主流程仍可能带着无法画像的路径进入后续步骤，导致边界和验证线索缺失。 | 在 `scripts/batch_generate.py` 新增 `--require-path-inspection`，用于真实生成、`--dry-run`、`--check` 和 `--lint-output` 前的准备流程；要求每个任务有 path/inspect_path/target_path，并复用 `inspect_path_context` 扫描路径，路径缺失、不可读、扫描失败或无文件画像时跳过任务并返回非零退出码。该门禁不回填字段，不替代 `--inspect-paths` 报告，而是把路径画像可用性接入主流程。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量主流程路径画像可读性门禁 | `--require-existing-task-path` | 既有门禁只检查路径字段存在且本地路径存在；新功能实际运行路径画像扫描，能发现不可读、空目录或无法提取上下文的问题。 | 通过 |
+| 批量主流程路径画像可读性门禁 | `--inspect-paths` | `--inspect-paths` 是分析模式输出路径画像报告；新功能把路径画像是否可用接入真实生成/dry-run/check/lint-output 的退出码和跳过报告。 | 通过 |
+| 批量主流程路径画像可读性门禁 | `--enrich-from-paths` | `--enrich-from-paths` 使用路径建议字段生成增强任务 JSON；新功能不修改任务字段，只作为主流程准入门禁检查路径画像可用性。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量主流程路径画像可读性门禁 | 团队要求每个批量任务不仅绑定路径，而且该路径必须可扫描、能产生代码上下文画像，避免生成缺少真实代码边界的 `/goal`。 | 先跑 `--inspect-paths` 人工确认全部通过，再跑生成；如果脚本漏掉预检，只能靠 `--require-existing-task-path` 的存在性检查。 | 一条主流程命令即可在生成前阻断路径缺失或画像失败的任务，报告给出修复建议，减少路径预检遗漏。 | 这是路径画像可用性准入门禁，不是路径存在检查、路径画像展示、字段回填或输出格式变化。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 44 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1490,7 +1525,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 43 轮已完成并准备进入第 44 轮；累计修复 4 个已完成问题，新增 43 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 44 轮审查已完成，准备实现批量主流程路径画像可读性门禁；累计修复 4 个已完成问题，新增 43 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
