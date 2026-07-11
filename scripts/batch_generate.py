@@ -40,6 +40,7 @@ CLAUSE_SPLIT_PATTERN = re.compile(r"[，。；;\n]+")
 DEPENDENCY_SPLIT_PATTERN = re.compile(r"[,;，；、\n]+")
 BATCH_INSPECT_PATH_PATTERN = re.compile(r"(?:^|\s|`)([\w./-]+/[\w./-]*|[\w.-]+\.[A-Za-z0-9]+)")
 RISK_LEVEL_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
+REDACTION_LEVEL_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 FALLBACK_HINTS: dict[str, tuple[str, ...]] = {
     "verification": ("验证", "运行", "执行", "确认", "检查", "通过", "跑测试"),
     "constraints": ("不改", "不修改", "不改变", "不引入", "禁止", "不得", "保持", "兼容"),
@@ -157,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         required_name_pattern = _required_name_pattern_from_args(args)
         require_valid_dependencies = _require_valid_dependencies_from_args(args)
         require_dependency_order = _require_dependency_order_from_args(args)
+        redaction_threshold = _redaction_threshold_from_args(args)
         no_overwrite = _no_overwrite_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
@@ -257,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         max_defaulted_fields,
         min_description_length,
         task_risk_threshold,
+        redaction_threshold,
         required_explicit_fields,
         forbidden_default_fields,
         require_task_path,
@@ -325,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
     if min_description_length is not None and _has_description_length_skips(skipped_tasks):
         return 1
     if task_risk_threshold and _has_task_risk_gate_skips(skipped_tasks):
+        return 1
+    if redaction_threshold and _has_redaction_gate_skips(skipped_tasks):
         return 1
     if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
         return 1
@@ -404,6 +409,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--fail-on-task-risk-level",
         choices=tuple(RISK_LEVEL_ORDER),
         help="真实生成、dry-run、check 或 lint-output 时存在指定风险等级及以上任务则跳过并失败。",
+    )
+    parser.add_argument(
+        "--fail-on-redaction-level",
+        choices=tuple(REDACTION_LEVEL_ORDER),
+        help="真实生成、dry-run、check 或 lint-output 时存在指定敏感信息等级及以上任务则跳过并失败。",
     )
     parser.add_argument(
         "--require-explicit-fields",
@@ -554,6 +564,27 @@ def _task_risk_threshold_from_args(args: argparse.Namespace) -> str:
     ):
         raise ValueError("--fail-on-task-risk-level 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return task_risk_threshold
+
+
+def _redaction_threshold_from_args(args: argparse.Namespace) -> str:
+    redaction_threshold = args.fail_on_redaction_level or ""
+    if not redaction_threshold:
+        return ""
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--fail-on-redaction-level 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return redaction_threshold
 
 
 def _max_task_count_from_args(args: argparse.Namespace) -> int | None:
@@ -3440,6 +3471,7 @@ def _process_tasks(
     max_defaulted_fields: int | None = None,
     min_description_length: int | None = None,
     task_risk_threshold: str = "",
+    redaction_threshold: str = "",
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
@@ -3495,6 +3527,13 @@ def _process_tasks(
         dependency_order_issues = dependency_order_issues_by_task.get(task.name, [])
         if dependency_order_issues:
             reason = _dependency_order_gate_error(task.name, dependency_order_issues)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        redaction_issue = _redaction_gate_issue(task, redaction_threshold)
+        if redaction_issue:
+            reason = _redaction_gate_error(task.name, redaction_threshold, redaction_issue)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -3678,6 +3717,84 @@ def _has_dependency_order_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("依赖顺序无效" in skipped.reason for skipped in skipped_tasks)
 
 
+def _redaction_gate_issue(task: TaskSpec, threshold: str) -> dict[str, object] | None:
+    if not threshold or task.load_error:
+        return None
+    text = _task_redaction_text(task)
+    if not text.strip():
+        return None
+    report = check_redaction(text)
+    if not _redaction_report_matches_threshold(report, threshold):
+        return None
+    return {
+        "risk_level": report.get("risk_level", "unknown"),
+        "risk_score": report.get("risk_score", 0),
+        "finding_count": report.get("finding_count", 0),
+        "finding_types": report.get("finding_types", []),
+        "max_severity": _max_redaction_severity_label(report),
+        "recommended_action": report.get("recommended_action", ""),
+    }
+
+
+def _redaction_report_matches_threshold(report: dict[str, object], threshold: str) -> bool:
+    threshold_value = REDACTION_LEVEL_ORDER.get(threshold)
+    if threshold_value is None:
+        return False
+    if threshold == "critical":
+        return _max_redaction_severity_value(report) >= threshold_value
+    risk_value = REDACTION_LEVEL_ORDER.get(str(report.get("risk_level", "none")), 0)
+    severity_value = _max_redaction_severity_value(report)
+    return max(risk_value, severity_value) >= threshold_value
+
+
+def _max_redaction_severity_value(report: dict[str, object]) -> int:
+    findings = report.get("findings", [])
+    if not isinstance(findings, list):
+        return 0
+    severity_values: list[int] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        severity_values.append(REDACTION_LEVEL_ORDER.get(str(finding.get("severity", "none")), 0))
+    return max(severity_values, default=0)
+
+
+def _max_redaction_severity_label(report: dict[str, object]) -> str:
+    max_value = _max_redaction_severity_value(report)
+    for label, value in REDACTION_LEVEL_ORDER.items():
+        if value == max_value:
+            return label
+    return "none"
+
+
+def _redaction_gate_error(task_name: str, threshold: str, issue: dict[str, object]) -> str:
+    risk_level = str(issue.get("risk_level", "unknown"))
+    risk_score = issue.get("risk_score", 0)
+    max_severity = str(issue.get("max_severity", "unknown"))
+    finding_count = issue.get("finding_count", 0)
+    type_text = _redaction_finding_types_text(issue.get("finding_types", []))
+    recommended_action = str(issue.get("recommended_action", "")).strip()
+    action_text = f"；处理建议：{recommended_action}" if recommended_action else ""
+    return (
+        f"敏感信息风险超限：{task_name}；--fail-on-redaction-level {threshold} "
+        f"命中风险级别 {risk_level}/{risk_score}，最高严重度 {max_severity}，发现 {finding_count} 个"
+        f"{type_text}{action_text}"
+    )
+
+
+def _redaction_finding_types_text(finding_types: object) -> str:
+    if not isinstance(finding_types, list) or not finding_types:
+        return ""
+    type_preview = "、".join(str(finding_type) for finding_type in finding_types[:5])
+    if len(finding_types) > 5:
+        type_preview = f"{type_preview} 等 {len(finding_types)} 类"
+    return f"（类型：{type_preview}）"
+
+
+def _has_redaction_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("敏感信息风险超限" in skipped.reason for skipped in skipped_tasks)
+
+
 def _task_risk_gate_issue(task: TaskSpec, threshold: str) -> dict[str, object] | None:
     if not threshold or task.load_error:
         return None
@@ -3787,6 +3904,8 @@ def _skip_suggestion(reason: str) -> str:
         return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
     if "description 长度不足" in reason:
         return "扩写任务 description，补充目标、范围、验证方式、约束或受阻条件等关键上下文。"
+    if "敏感信息风险超限" in reason:
+        return "先运行 --redaction-check 查看完整发现和脱敏预览，移除或占位敏感片段后再生成，或确认后调整 --fail-on-redaction-level 阈值。"
     if "任务风险等级超限" in reason:
         return "先运行 --profile-tasks 查看完整风险画像，拆分高风险任务、补充约束和验证面，或确认后调整 --fail-on-task-risk-level 阈值。"
     if "任务路径画像失败" in reason:
