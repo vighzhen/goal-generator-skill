@@ -1207,6 +1207,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "lint-task-schema"`、`python3 scripts/batch_generate.py --input /tmp/round35_schema_good.json --lint-task-schema --summary-only --report-json /tmp/round35_schema_good_report.json`、坏 JSON 清单 `--lint-task-schema` 返回失败退出码并断言报告包含未知任务字段、未知 6 要素字段、非标量字段、路径别名冲突和 description 缺失、示例 CSV 清单 `--lint-task-schema` 通过、坏 CSV 清单返回失败退出码并断言报告包含未知表头和重复表头、`--output-file` 写出检查报告、`--lint-task-schema --max-defaulted-fields 1` 与 `--lint-task-schema --lint-output` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 36 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 36 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3773 行 sha256 af8819234ccad415、SKILL.md 144 行 sha256 c82a765faf434e55、README.md 511 行 sha256 b56d61773c7371c1、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 35 轮任务清单 Schema 门禁、依赖计划/依赖排序和主生成门禁；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量依赖合法性主流程门禁 | 现有 `--plan-dependencies` 可以在分析模式中发现未知依赖、重复任务名和循环依赖，`--dependency-order` 会按依赖拓扑重排并在依赖无效时失败；但团队有时希望保持输入顺序或已有排序策略，只是在真实生成、dry-run、check 或 lint-output 前阻断依赖关系无效的任务。当前只能先单独跑 `--plan-dependencies` 或被迫使用会改变顺序的 `--dependency-order`。 | 在 `scripts/batch_generate.py` 新增 `--require-valid-dependencies`，用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前复用依赖计划校验；发现未知依赖、自依赖、重复任务名或循环依赖时跳过对应任务并返回非零退出码，报告保留依赖错误和修复建议，但不改变原任务处理顺序。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量依赖合法性主流程门禁 | `--plan-dependencies` | `--plan-dependencies` 是独立分析模式，只输出依赖波次和问题，不进入生成/dry-run/lint-output；新功能把依赖合法性接入主流程退出码和跳过报告。 | 通过 |
+| 批量依赖合法性主流程门禁 | `--dependency-order` | `--dependency-order` 会改变处理顺序并以拓扑顺序生成；新功能不排序，只在保持原顺序的同时阻断依赖无效任务。 | 通过 |
+| 批量依赖合法性主流程门禁 | `--require-unique-task-names` | 唯一名称门禁只检查重复 name；新功能覆盖未知依赖、自依赖、循环依赖和重复名，是任务图合法性门禁。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量依赖合法性主流程门禁 | 批量任务已有 depends_on/dependencies，团队希望生成前确认依赖图可执行，但仍保留输入顺序、filter/sort/limit 或人工排序。 | 先跑 `--plan-dependencies` 再人工决定是否继续，或使用 `--dependency-order` 但接受输出顺序被改变；主生成命令本身无法作为依赖合法性门禁。 | 一条命令在主流程中阻断依赖错误任务、返回失败退出码并写入 `--report-json`，无需改变顺序或额外脚本。 | 新增任务图合法性准入门禁，不是依赖计划展示、拓扑排序或名称唯一检查的包装。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1215,7 +1245,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 35 轮已完成，准备进入第 36 轮；累计修复 4 个已完成问题，新增 35 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 36 轮审查清单已建立，正在实现批量依赖合法性主流程门禁；累计修复 4 个已完成问题，新增 35 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
