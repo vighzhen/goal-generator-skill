@@ -1173,6 +1173,36 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-name-pattern"`、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、匹配命名清单 `--dry-run --require-name-pattern '^AUTH-[0-9]+'` 通过并断言成功 1/跳过 0、混合命名清单 `--dry-run --require-name-pattern '^AUTH-[0-9]+'` 返回失败退出码并断言仅跳过 `登录修复`、真实生成、`--check` 与 `--lint-output` 组合均返回失败退出码并保留“任务名称不匹配正则”原因、`--profile-tasks` 无效组合与非法正则参数错误验证、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 35 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 35 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3327 行 sha256 dc80d5cdef01bed3、SKILL.md 144 行 sha256 532371d78806bcae、README.md 506 行 sha256 8010ea71da8c026e、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 34 轮任务名称正则门禁、路径/名称/字段准入门禁和批量生成前准备流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量任务清单 Schema 门禁 | 批量 JSON/CSV 清单中如果把 `description` 拼成 `descripton`、把 6 要素字段拼错，或同时填写多个冲突路径别名，当前主流程只会忽略未知字段或在后续生成时报“缺少 description”，需求方很难定位是清单结构错误而非任务内容缺失。团队在接入 CI 前需要一个专门检查输入清单结构、未知字段和别名冲突的入口。 | 在 `scripts/batch_generate.py` 新增 `--lint-task-schema` 分析模式，读取原始 JSON/CSV 输入并输出任务清单 Schema 报告；检查 JSON 顶层、任务对象、未知任务字段、`fields` 对象及未知 6 要素、CSV 未知/重复表头、description 缺失或为空、路径别名和依赖别名冲突等问题；任一问题返回非零退出码，并支持 `--report-json`、`--output-file`、`--summary-only`。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量任务清单 Schema 门禁 | `--check` / `--strict` | `--check` 在任务已经被解析后检查 6 要素缺失，会把拼错字段表现成内容缺失；新功能在原始输入层检查未知字段、表头和别名冲突，定位清单结构错误。 | 通过 |
+| 批量任务清单 Schema 门禁 | `--lint-fields` / `--lint-output` | 语义质量门禁关注 6 要素内容是否具体、可执行；新功能关注 JSON/CSV 任务清单字段形态和可解析性，不评价文本质量。 | 通过 |
+| 批量任务清单 Schema 门禁 | `--require-unique-task-names` / `--require-name-pattern` / 路径门禁 | 名称和路径门禁只治理某一类任务属性；新功能治理输入清单结构、未知字段和别名冲突，防止用户因字段拼写或格式错误进入后续流程。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量任务清单 Schema 门禁 | 团队把 Jira/表格/机器人导出的 JSON/CSV 接入批量生成前，需要确认字段名、表头、`fields` 内容和别名没有拼写错误或冲突。 | 运行 `--dry-run --strict` 后从“缺少 description/要素”倒推输入字段是否拼错，或写外部脚本审计 JSON/CSV 表头和字段。 | 一条命令直接指出未知字段、重复表头、非对象字段、description 缺失和别名冲突，并可作为 CI 门禁阻断坏清单。 | 新增原始输入结构校验能力，不是 6 要素语义检查、任务筛选、名称门禁或报告展示变体。 | 达标 |
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1181,7 +1211,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 34 轮已完成，准备进入第 35 轮；累计修复 4 个已完成问题，新增 34 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 35 轮审查清单已建立，正在实现批量任务清单 Schema 门禁；累计修复 4 个已完成问题，新增 34 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
