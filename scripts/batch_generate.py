@@ -142,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         min_lint_score = _min_lint_score_from_args(args)
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
+        min_description_length = _min_description_length_from_args(args)
         max_task_count = _max_task_count_from_args(args)
         require_non_empty = _require_non_empty_from_args(args)
         _require_output_target_from_args(args)
@@ -251,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         default_values,
         args.verbose,
         max_defaulted_fields,
+        min_description_length,
         required_explicit_fields,
         forbidden_default_fields,
         require_task_path,
@@ -313,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_lint_output_summary(output_lint_report))
     print(_format_summary(stats))
     if max_defaulted_fields is not None and _has_defaulted_limit_skips(skipped_tasks):
+        return 1
+    if min_description_length is not None and _has_description_length_skips(skipped_tasks):
         return 1
     if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
         return 1
@@ -378,6 +382,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-defaulted-fields",
         type=int,
         help="真实生成或 dry-run 时允许每个任务最多默认填充的 6 要素数量（0-6）。",
+    )
+    parser.add_argument(
+        "--min-description-length",
+        type=int,
+        help="真实生成、dry-run、check 或 lint-output 时要求每个任务 description 至少达到指定字符数。",
     )
     parser.add_argument(
         "--require-explicit-fields",
@@ -474,6 +483,29 @@ def _max_defaulted_fields_from_args(args: argparse.Namespace) -> int | None:
     ):
         raise ValueError("--max-defaulted-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return max_defaulted_fields
+
+
+def _min_description_length_from_args(args: argparse.Namespace) -> int | None:
+    min_description_length = args.min_description_length
+    if min_description_length is None:
+        return None
+    if min_description_length < 1:
+        raise ValueError("--min-description-length 必须是大于 0 的整数")
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--min-description-length 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return min_description_length
 
 
 def _max_task_count_from_args(args: argparse.Namespace) -> int | None:
@@ -3316,6 +3348,7 @@ def _process_tasks(
     default_values: dict[str, str],
     verbose: bool,
     max_defaulted_fields: int | None = None,
+    min_description_length: int | None = None,
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
@@ -3371,6 +3404,7 @@ def _process_tasks(
                 used_slugs,
                 verbose,
                 max_defaulted_fields,
+                min_description_length,
                 required_explicit_fields or [],
                 forbidden_default_fields or [],
                 require_task_path,
@@ -3485,6 +3519,8 @@ def _skip_suggestion(reason: str) -> str:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
         return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
+    if "description 长度不足" in reason:
+        return "扩写任务 description，补充目标、范围、验证方式、约束或受阻条件等关键上下文。"
     if "禁止默认兜底要素" in reason:
         return "在任务 fields 中填写这些要素，或在 description 中补充可被识别的明确字段内容。"
     if "缺少显式要素" in reason:
@@ -3507,6 +3543,7 @@ def _process_one_task(
     used_slugs: set[str],
     verbose: bool,
     max_defaulted_fields: int | None = None,
+    min_description_length: int | None = None,
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
@@ -3517,6 +3554,8 @@ def _process_one_task(
         raise ValueError(task.load_error)
     if not task.description:
         raise ValueError("缺少 description")
+    if min_description_length is not None and len(task.description.strip()) < min_description_length:
+        raise ValueError(_description_length_error(task.description, min_description_length))
     if (require_task_path or require_existing_task_path) and not task.inspect_path:
         raise ValueError(_required_task_path_error())
     if require_existing_task_path and not Path(task.inspect_path).exists():
@@ -3559,6 +3598,17 @@ def _defaulted_limit_error(defaulted_keys: list[str], max_defaulted_fields: int)
 
 def _has_defaulted_limit_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("超过 --max-defaulted-fields" in skipped.reason for skipped in skipped_tasks)
+
+
+def _description_length_error(description: str, min_description_length: int) -> str:
+    return (
+        f"description 长度不足：当前 {len(description.strip())} 个字符，"
+        f"低于 --min-description-length {min_description_length}"
+    )
+
+
+def _has_description_length_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("description 长度不足" in skipped.reason for skipped in skipped_tasks)
 
 
 def _required_task_path_error() -> str:

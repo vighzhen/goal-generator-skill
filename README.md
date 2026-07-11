@@ -332,6 +332,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 默认填充数量门禁：每个任务最多允许默认填充 2 个要素，超限任务会跳过并返回非零退出码
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-defaulted-fields 2 --report-json batch_report.json
 
+# 描述长度门禁：原始 description 低于 20 个字符的任务会跳过并返回非零退出码
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --min-description-length 20 --report-json batch_report.json
+
 # 显式来源门禁：要求 verification 和 boundaries 必须由 fields 或 description 标签明确提供
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --require-explicit-fields verification,boundaries --report-json batch_report.json
 
@@ -430,6 +433,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 - `--require-existing-task-path` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务缺少路径字段或路径不存在时会跳过并返回非零退出码，适合生成前确保批量任务路径锚点在当前仓库中真实可访问。
 - `--allowed-path-roots <根目录列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务路径必须位于任一允许根目录内，根目录列表用逗号、分号、顿号或换行分隔。该门禁会要求任务提供路径字段，但不单独检查路径存在性；如需同时检查存在性可配合 `--require-existing-task-path`。
 - `--max-defaulted-fields <0-6>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；当某任务默认填充数量超过阈值时，该任务会跳过并让命令返回非零退出码，适合在完全 `--strict` 前做渐进式质量门禁。
+- `--min-description-length <N>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务原始 `description` 去除首尾空白后必须至少达到 N 个字符，否则会跳过并返回非零退出码，适合阻断“优化”“修 bug”这类信息量过低但非空的批量需求。
 - `--require-explicit-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表支持 6 要素 key、英文标签或中文标签，多个字段用逗号、分号、顿号或换行分隔。被要求的字段必须来自任务 `fields` 或 `description` 中的显式标签，不能只靠描述启发式推断或默认值兜底。
 - `--forbid-default-fields <字段列表>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；字段列表同样支持 6 要素 key、英文标签或中文标签。被禁止默认的字段可以来自任务 `fields`、`description` 显式标签或描述启发式识别，但不能落到默认值兜底。
 - `--defaults-json <path>` 或 `GOAL_GENERATOR_DEFAULTS_JSON` 可覆盖默认填充策略。
@@ -518,6 +522,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
+- 批量任务描述最小长度门禁
 - 批量任务数量上限门禁
 - 批量非空任务集门禁
 - 批量任务清单 Schema 门禁（未知字段、重复表头、description 缺失和别名冲突）
