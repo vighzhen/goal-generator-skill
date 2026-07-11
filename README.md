@@ -371,6 +371,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run -
 # 只处理前 2 个任务，适合大清单首次接入时快速试跑
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --limit 2
 
+# 任务数量上限门禁：筛选和 limit 后仍超过 20 个任务时失败，不自动截断
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --dry-run --max-task-count 20
+
 # 只预览将要处理的任务名称，适合检查 filter/sort/limit 是否命中正确范围
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --list-tasks --filter "测试|Bug"
 
@@ -411,6 +414,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 - `--lint-task-schema` 不生成 `/goal` 正文，而是直接检查原始 JSON/CSV 任务清单结构；会报告未知任务字段、未知 `fields` 6 要素、非对象 `fields`、CSV 未知或重复表头、`description` 缺失或为空、`path`/`inspect_path`/`target_path` 以及 `depends_on`/`dependencies` 别名冲突等问题，任一问题都会返回非零退出码，并可配合 `--output-file`、`--summary-only` 和 `--report-json` 接入 CI。
 - `--output-dir` 和 `--output-file` 互斥。
 - `--no-overwrite` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 的批量输出写入前保护；如果 `--output-file`、`--output-dir` 内本次将生成的 `.txt` 文件或 `--report-json` 已存在，或多个输出目标指向同一路径，命令会在写入任何输出文件前失败，适合 CI 和多人协作中保护历史交付物。该门禁不用于 `--questions`、`--profile-tasks`、`--lint-task-schema` 等分析模式。
+- `--max-task-count <N>` 会在任务读取、`--filter`、`--sort-by` 和 `--limit` 后检查当前将处理的任务数量；超过阈值时直接失败，不会像 `--limit` 一样自动截断，适合防止 CI、机器人导出或多人合并时意外生成过大的任务批次。该门禁适用于读取任务清单的批量模式，不用于 `--lint-defaults-json` 或 `--lint-task-schema`。
 - 任务中缺失的 6 要素会先尝试从 `description` 分析补齐；仍缺失时默认使用交互模式同款默认值填充，并在输出中标注默认填充的要素。
 - `--require-unique-task-names` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；同名任务会全部跳过并返回非零退出码，适合依赖计划、补充回答合并或人工审计前确保任务身份唯一。
 - `--require-name-pattern <regex>` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 前的准备流程；任务名不匹配给定 Python 正则时会跳过并返回非零退出码，适合把 Jira/Issue 编号、模块前缀或团队命名规范接入批量生成门禁。
@@ -506,6 +510,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 单任务输出写入文件
 - 单任务从 JSON 文件读取 6 要素生成 `/goal`
 - 批量过滤、排序、limit 试跑、去重、摘要输出、strict/check/fail-on-skipped 门禁
+- 批量任务数量上限门禁
 - 批量任务清单 Schema 门禁（未知字段、重复表头、description 缺失和别名冲突）
 - 批量输出覆盖保护门禁
 - 团队默认值 JSON 语义质量门禁

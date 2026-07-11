@@ -142,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         min_lint_score = _min_lint_score_from_args(args)
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
+        max_task_count = _max_task_count_from_args(args)
         required_explicit_fields = _required_explicit_fields_from_args(args)
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
         require_task_path = _require_task_path_from_args(args)
@@ -183,6 +184,9 @@ def main(argv: list[str] | None = None) -> int:
         tasks = _filter_tasks(tasks, args.filter)
         tasks = _sort_tasks(tasks, args.sort_by)
         tasks = _limit_tasks(tasks, args.limit)
+        if max_task_count is not None and len(tasks) > max_task_count:
+            print(_max_task_count_error(len(tasks), max_task_count), file=sys.stderr)
+            return 1
         if args.dependency_order:
             tasks = _apply_dependency_order(tasks, args.dedupe)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -340,6 +344,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filter", help="按正则筛选任务名或描述，只处理匹配的任务。")
     parser.add_argument("--sort-by", choices=("input", "name"), default="input", help="批量任务输出顺序，默认保持输入顺序。")
     parser.add_argument("--limit", type=int, help="只处理前 N 个任务，适合大清单试跑。")
+    parser.add_argument("--max-task-count", type=int, help="任务读取、筛选和 limit 后最多允许处理的任务数量，超限时失败而不截断。")
     parser.add_argument("--list-tasks", action="store_true", help="只预览将要处理的任务名称，不生成 /goal。")
     parser.add_argument("--plan-dependencies", action="store_true", help="根据 depends_on/dependencies 字段输出批量任务依赖执行计划。")
     parser.add_argument("--dependency-order", action="store_true", help="按 depends_on/dependencies 拓扑顺序处理批量任务。")
@@ -458,6 +463,17 @@ def _max_defaulted_fields_from_args(args: argparse.Namespace) -> int | None:
     ):
         raise ValueError("--max-defaulted-fields 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return max_defaulted_fields
+
+
+def _max_task_count_from_args(args: argparse.Namespace) -> int | None:
+    max_task_count = args.max_task_count
+    if max_task_count is None:
+        return None
+    if max_task_count < 0:
+        raise ValueError("--max-task-count 必须是大于或等于 0 的整数")
+    if args.lint_defaults_json or args.lint_task_schema:
+        raise ValueError("--max-task-count 需要读取批量任务清单，不适用于 --lint-defaults-json 或 --lint-task-schema")
+    return max_task_count
 
 
 def _required_explicit_fields_from_args(args: argparse.Namespace) -> list[str]:
@@ -736,6 +752,13 @@ def _limit_tasks(tasks: list[TaskSpec], limit: int | None) -> list[TaskSpec]:
     if limit < 1:
         raise ValueError("--limit 必须是大于 0 的整数")
     return tasks[:limit]
+
+
+def _max_task_count_error(task_count: int, max_task_count: int) -> str:
+    return (
+        f"任务数量超限：当前将处理 {task_count} 个任务，超过 --max-task-count {max_task_count}；"
+        "请缩小输入清单、调整 --filter，或确认后使用 --limit 明确截断。"
+    )
 
 
 def _apply_dependency_order(tasks: list[TaskSpec], dedupe: bool) -> list[TaskSpec]:
