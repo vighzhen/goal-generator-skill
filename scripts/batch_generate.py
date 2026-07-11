@@ -146,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         max_task_count = _max_task_count_from_args(args)
         require_non_empty = _require_non_empty_from_args(args)
         _require_output_target_from_args(args)
+        task_risk_threshold = _task_risk_threshold_from_args(args)
         required_explicit_fields = _required_explicit_fields_from_args(args)
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
         require_task_path = _require_task_path_from_args(args)
@@ -254,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         args.verbose,
         max_defaulted_fields,
         min_description_length,
+        task_risk_threshold,
         required_explicit_fields,
         forbidden_default_fields,
         require_task_path,
@@ -319,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
     if max_defaulted_fields is not None and _has_defaulted_limit_skips(skipped_tasks):
         return 1
     if min_description_length is not None and _has_description_length_skips(skipped_tasks):
+        return 1
+    if task_risk_threshold and _has_task_risk_gate_skips(skipped_tasks):
         return 1
     if required_explicit_fields and _has_explicit_field_skips(skipped_tasks):
         return 1
@@ -391,6 +395,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-description-length",
         type=int,
         help="真实生成、dry-run、check 或 lint-output 时要求每个任务 description 至少达到指定字符数。",
+    )
+    parser.add_argument(
+        "--fail-on-task-risk-level",
+        choices=tuple(RISK_LEVEL_ORDER),
+        help="真实生成、dry-run、check 或 lint-output 时存在指定风险等级及以上任务则跳过并失败。",
     )
     parser.add_argument(
         "--require-explicit-fields",
@@ -515,6 +524,27 @@ def _min_description_length_from_args(args: argparse.Namespace) -> int | None:
     ):
         raise ValueError("--min-description-length 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
     return min_description_length
+
+
+def _task_risk_threshold_from_args(args: argparse.Namespace) -> str:
+    task_risk_threshold = args.fail_on_task_risk_level or ""
+    if not task_risk_threshold:
+        return ""
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--fail-on-task-risk-level 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return task_risk_threshold
 
 
 def _max_task_count_from_args(args: argparse.Namespace) -> int | None:
@@ -3380,6 +3410,7 @@ def _process_tasks(
     verbose: bool,
     max_defaulted_fields: int | None = None,
     min_description_length: int | None = None,
+    task_risk_threshold: str = "",
     required_explicit_fields: list[str] | None = None,
     forbidden_default_fields: list[str] | None = None,
     require_task_path: bool = False,
@@ -3434,6 +3465,13 @@ def _process_tasks(
         dependency_order_issues = dependency_order_issues_by_task.get(task.name, [])
         if dependency_order_issues:
             reason = _dependency_order_gate_error(task.name, dependency_order_issues)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        task_risk_issue = _task_risk_gate_issue(task, task_risk_threshold)
+        if task_risk_issue:
+            reason = _task_risk_gate_error(task.name, task_risk_threshold, task_risk_issue)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -3603,6 +3641,50 @@ def _has_dependency_order_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("依赖顺序无效" in skipped.reason for skipped in skipped_tasks)
 
 
+def _task_risk_gate_issue(task: TaskSpec, threshold: str) -> dict[str, object] | None:
+    if not threshold or task.load_error:
+        return None
+    profile_text, profile_source = _task_profile_text(task)
+    if not profile_text:
+        return None
+    profile = build_task_profile(profile_text)
+    risk_level = str(profile.get("risk_level", "unknown"))
+    if not _risk_level_matches_threshold(risk_level, threshold):
+        return None
+    return {
+        "risk_level": risk_level,
+        "risk_score": profile.get("risk_score", 0),
+        "risk_factors": profile.get("risk_factors", []),
+        "profile_source": profile_source,
+    }
+
+
+def _task_risk_gate_error(task_name: str, threshold: str, issue: dict[str, object]) -> str:
+    risk_level = str(issue.get("risk_level", "unknown"))
+    risk_score = issue.get("risk_score", 0)
+    factors = issue.get("risk_factors", [])
+    factor_text = _task_risk_factor_text(factors)
+    profile_source = str(issue.get("profile_source", "unknown"))
+    return (
+        f"任务风险等级超限：{task_name}；--fail-on-task-risk-level {threshold} "
+        f"命中 {risk_level}/{risk_score}（来源：{profile_source}）"
+        f"{factor_text}"
+    )
+
+
+def _task_risk_factor_text(factors: object) -> str:
+    if not isinstance(factors, list) or not factors:
+        return ""
+    factor_preview = "；".join(str(factor) for factor in factors[:3])
+    if len(factors) > 3:
+        factor_preview = f"{factor_preview}；其余 {len(factors) - 3} 个风险因素可用 --profile-tasks 查看"
+    return f"；风险因素：{factor_preview}"
+
+
+def _has_task_risk_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("任务风险等级超限" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -3630,6 +3712,8 @@ def _skip_suggestion(reason: str) -> str:
         return "补齐超限的 6 要素，或在确认可接受默认兜底后调高 --max-defaulted-fields。"
     if "description 长度不足" in reason:
         return "扩写任务 description，补充目标、范围、验证方式、约束或受阻条件等关键上下文。"
+    if "任务风险等级超限" in reason:
+        return "先运行 --profile-tasks 查看完整风险画像，拆分高风险任务、补充约束和验证面，或确认后调整 --fail-on-task-risk-level 阈值。"
     if "禁止默认兜底要素" in reason:
         return "在任务 fields 中填写这些要素，或在 description 中补充可被识别的明确字段内容。"
     if "缺少显式要素" in reason:
