@@ -1344,6 +1344,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help` 断言包含 `--require-non-empty`、命中任务的 `--dry-run --filter alpha --require-non-empty` 通过、无命中 `--filter does-not-match --require-non-empty` 返回失败并断言“任务集为空”、空 JSON 清单 `--require-non-empty` 返回失败、`--list-tasks --filter does-not-match --require-non-empty` 返回失败、`--require-non-empty --max-task-count 0` 参数错误、`--lint-defaults-json --require-non-empty` 与 `--lint-task-schema --require-non-empty` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 40 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 40 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3996 行 sha256 30f9bf50a7e7b6fd、SKILL.md 144 行 sha256 ae932a76dc6b6426、README.md 531 行 sha256 659b46409e94d4d3、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 39 轮非空任务集门禁、输出写入流程和批量真实生成/`--lint-output` 交付路径；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量交付目标必填门禁 | 批量真实生成默认会把完整 `/goal` 正文打印到 stdout；CI 或多人协作脚本中如果忘记指定 `--output-file` 或 `--output-dir`，可能只留下难检索的日志、丢失交付物，或把大批正文刷屏。第 37 轮 `--no-overwrite` 只保护已有目标不被覆盖，不能强制必须落盘。 | 在 `scripts/batch_generate.py` 新增 `--require-output-target`，仅适用于真实批量生成和 `--lint-output`；当没有指定 `--output-file` 或 `--output-dir` 时在读取/生成前失败。该门禁不用于 `--dry-run`、`--check` 或分析模式，避免把非交付预览也强制落盘。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量交付目标必填门禁 | `--output-file` / `--output-dir` | 既有参数提供落盘目标；新功能强制真实生成必须选择落盘目标，防止 stdout-only 交付。 | 通过 |
+| 批量交付目标必填门禁 | `--no-overwrite` | `--no-overwrite` 检查已有目标是否会被覆盖；新功能检查是否存在明确交付目标，治理的是缺失目标而非目标冲突。 | 通过 |
+| 批量交付目标必填门禁 | `--summary-only` | `--summary-only` 抑制正文 stdout；新功能要求正文落盘，避免真实生成结果只存在于终端或被完全抑制。 | 通过 |
+| 批量交付目标必填门禁 | `--lint-output` | `--lint-output` 检查最终文本质量；新功能确保质量通过后的正文有明确交付路径，不评价文本质量。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量交付目标必填门禁 | CI 或发布脚本要求批量真实生成必须产出可审计文件，不能只把多个 `/goal` 打到 stdout 或被 `--summary-only` 抑制。 | 靠脚本约定人工检查命令是否带 `--output-file`/`--output-dir`，或事后从日志里复制正文；忘记时命令仍可能返回成功。 | 一条命令把“必须落盘”变成失败门禁，在生成前暴露交付目标缺失，避免日志型交付和交付物缺失。 | 这是交付路径存在性准入门禁，不是输出格式、覆盖保护、文本质量检查或任务筛选的包装。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 40 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1352,7 +1387,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 39 轮已完成，准备进入第 40 轮；累计修复 4 个已完成问题，新增 39 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 40 轮审查已完成，准备实现批量交付目标必填门禁；累计修复 4 个已完成问题，新增 39 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
