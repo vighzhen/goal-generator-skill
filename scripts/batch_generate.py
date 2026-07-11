@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         allowed_path_roots = _allowed_path_roots_from_args(args)
         require_unique_task_names = _require_unique_task_names_from_args(args)
         required_name_pattern = _required_name_pattern_from_args(args)
+        require_valid_dependencies = _require_valid_dependencies_from_args(args)
         if args.fail_on_high_risk and not args.profile_tasks:
             print("--fail-on-high-risk 仅适用于 --profile-tasks。", file=sys.stderr)
             return 1
@@ -247,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         allowed_path_roots,
         require_unique_task_names,
         required_name_pattern,
+        require_valid_dependencies,
     )
     output_lint_report = None
     if args.lint_output:
@@ -304,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
     if require_unique_task_names and _has_duplicate_name_skips(skipped_tasks):
         return 1
     if required_name_pattern and _has_name_pattern_skips(skipped_tasks):
+        return 1
+    if require_valid_dependencies and _has_dependency_gate_skips(skipped_tasks):
         return 1
     if fail_on_skipped and stats.skipped_count:
         return 1
@@ -382,6 +386,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-name-pattern",
         help="真实生成、dry-run、check 或 lint-output 时要求每个任务 name 匹配该正则表达式。",
+    )
+    parser.add_argument(
+        "--require-valid-dependencies",
+        action="store_true",
+        help="真实生成、dry-run、check 或 lint-output 时要求 depends_on/dependencies 依赖图合法但不改变任务顺序。",
     )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
@@ -595,6 +604,26 @@ def _required_name_pattern_from_args(args: argparse.Namespace) -> re.Pattern[str
         return re.compile(pattern_value)
     except re.error as error:
         raise ValueError(f"--require-name-pattern 正则无效：{error}") from error
+
+
+def _require_valid_dependencies_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_valid_dependencies:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+    ):
+        raise ValueError("--require-valid-dependencies 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
 
 
 def _field_list_from_value(field_list_value: str, option_name: str) -> list[str]:
@@ -3185,6 +3214,7 @@ def _process_tasks(
     allowed_path_roots: list[Path] | None = None,
     require_unique_task_names: bool = False,
     required_name_pattern: re.Pattern[str] | None = None,
+    require_valid_dependencies: bool = False,
 ) -> tuple[list[TaskOutput], list[SkippedTask]]:
     outputs: list[TaskOutput] = []
     skipped_tasks: list[SkippedTask] = []
@@ -3192,6 +3222,11 @@ def _process_tasks(
     seen_task_keys: set[str] = set()
     duplicate_names = (
         set(_duplicate_task_names(_effective_tasks_for_name_gate(tasks, dedupe))) if require_unique_task_names else set()
+    )
+    dependency_issues_by_task = (
+        _dependency_gate_issues_by_task(_effective_tasks_for_name_gate(tasks, dedupe))
+        if require_valid_dependencies
+        else {}
     )
     for index, task in enumerate(tasks, start=1):
         if dedupe and _is_duplicate_task(task, seen_task_keys):
@@ -3206,6 +3241,13 @@ def _process_tasks(
             continue
         if required_name_pattern and not required_name_pattern.search(task.name):
             reason = _name_pattern_error(task.name, required_name_pattern.pattern)
+            suggestion = _skip_suggestion(reason)
+            skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
+            print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
+            continue
+        dependency_issues = dependency_issues_by_task.get(task.name, [])
+        if dependency_issues:
+            reason = _dependency_gate_error(task.name, dependency_issues)
             suggestion = _skip_suggestion(reason)
             skipped_tasks.append(SkippedTask(task.name, reason, suggestion))
             print(f"跳过任务 {task.name}：{reason}；建议：{suggestion}", file=sys.stderr)
@@ -3273,6 +3315,44 @@ def _has_name_pattern_skips(skipped_tasks: list[SkippedTask]) -> bool:
     return any("任务名称不匹配正则" in skipped.reason for skipped in skipped_tasks)
 
 
+def _dependency_gate_issues_by_task(tasks: list[TaskSpec]) -> dict[str, list[dict[str, str]]]:
+    plan = _build_dependency_plan(tasks)
+    grouped: dict[str, list[dict[str, str]]] = {}
+    issues = plan.get("issues", [])
+    if not isinstance(issues, list):
+        return grouped
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        task_name = str(issue.get("name", "")).strip()
+        if not task_name:
+            continue
+        grouped.setdefault(task_name, []).append(
+            {
+                "reason": str(issue.get("reason", "")),
+                "suggestion": str(issue.get("suggestion", "")),
+            }
+        )
+    return grouped
+
+
+def _dependency_gate_error(task_name: str, issues: list[dict[str, str]]) -> str:
+    reason_text = "；".join(
+        issue.get("reason", "")
+        for issue in issues[:3]
+        if issue.get("reason", "")
+    )
+    if len(issues) > 3:
+        reason_text = f"{reason_text}；其余 {len(issues) - 3} 个依赖问题可用 --plan-dependencies 查看"
+    if not reason_text:
+        reason_text = "未知依赖问题"
+    return f"依赖关系无效：{task_name}；--require-valid-dependencies 检查失败：{reason_text}"
+
+
+def _has_dependency_gate_skips(skipped_tasks: list[SkippedTask]) -> bool:
+    return any("依赖关系无效" in skipped.reason for skipped in skipped_tasks)
+
+
 def _dedupe_key(task: TaskSpec) -> str:
     return _normalize_description(f"{task.name}\n{task.description}")
 
@@ -3290,6 +3370,8 @@ def _skip_suggestion(reason: str) -> str:
         return "为同名任务改成唯一 name；如果确实是重复任务，可先使用 --dedupe 移除完全重复项。"
     if "任务名称不匹配正则" in reason:
         return "按 --require-name-pattern 指定的团队命名规则调整任务 name，或确认后放宽正则。"
+    if "依赖关系无效" in reason:
+        return "修正 depends_on/dependencies 中的未知依赖、自依赖、重复任务名或循环依赖；可先运行 --plan-dependencies 查看完整依赖报告。"
     if "strict 模式缺失要素" in reason:
         return "补齐提示中的 6 要素，或移除 --strict 允许脚本使用默认值。"
     if "超过 --max-defaulted-fields" in reason:
