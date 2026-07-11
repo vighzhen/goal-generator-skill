@@ -1241,6 +1241,41 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help | grep -n "require-valid-dependencies"`、合法依赖清单 `--dry-run --require-valid-dependencies` 通过并写入 `--report-json`、未知依赖/自依赖清单返回失败退出码并断言报告包含“依赖不存在”和“任务依赖自身”、循环依赖清单返回失败退出码并断言报告包含“存在循环依赖”、示例任务清单 `--dry-run --require-valid-dependencies` 通过、坏依赖清单在 `--check`、真实生成和 `--lint-output` 组合下均返回失败退出码并保留依赖错误原因、`--plan-dependencies --require-valid-dependencies` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 37 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 37 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3855 行 sha256 057d4797bcb217a5、SKILL.md 144 行 sha256 372d06d1cf77fb26、README.md 516 行 sha256 ee53a3ea341c513f、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 36 轮依赖合法性主流程门禁、输出写入路径和批量生成主流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量输出覆盖保护门禁 | 批量生成使用 `--output-file`、`--output-dir` 或 `--report-json` 时，当前会直接覆盖同名交付物或报告；CI/多人协作中容易误把上一次审查证据、正式 `/goal` 包或报告覆盖掉。用户现在只能人工检查目录、临时改文件名或依赖外部脚本。 | 在 `scripts/batch_generate.py` 新增 `--no-overwrite`，用于真实生成、`--dry-run`、`--check` 和 `--lint-output` 的批量输出写入前预检；当目标 `--output-file`、`--output-dir` 中将生成的 `.txt` 文件或 `--report-json` 已存在，或多个输出目标指向同一路径时，命令在写入前失败并返回非零退出码。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量输出覆盖保护门禁 | `--output-file` / `--output-dir` | 既有参数只负责把生成结果写到指定位置；新功能是在写入前执行覆盖风险准入检查，避免已有交付物被覆盖。 | 通过 |
+| 批量输出覆盖保护门禁 | `--lint-output` | `--lint-output` 检查最终 `/goal` 文本质量，不检查文件系统是否会覆盖已有产物；新功能检查输出目标安全性。 | 通过 |
+| 批量输出覆盖保护门禁 | `--check` / `--dry-run` | `--check`/`--dry-run` 只分析任务完整度，若指定输出路径仍可能写出并覆盖文件；新功能专门治理输出写入冲突。 | 通过 |
+| 批量输出覆盖保护门禁 | `--report-json` | `--report-json` 只声明报告写入路径；新功能保护报告路径不被无意覆盖，也避免与正文输出路径互相覆盖。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量输出覆盖保护门禁 | 团队在 CI、本地预演或多人协作中需要保证批量生成不会覆盖已有 `/goal` 交付物、审查证据或 JSON 报告。 | 先 `ls`/手工检查目录和文件名，或写外部脚本判断目标是否存在；忘记检查时现有命令会直接覆盖。 | 一条命令在写入前阻断覆盖风险并列出冲突目标，失败时不会写任何输出文件，减少误删历史证据和交付物的风险。 | 这是文件系统写入安全门禁，不是输出格式、质量 lint、任务筛选或报告展示变体。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 37 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1249,7 +1284,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 36 轮已完成，准备进入第 37 轮；累计修复 4 个已完成问题，新增 36 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 37 轮审查已完成，准备实现批量输出覆盖保护门禁；累计修复 4 个已完成问题，新增 36 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
