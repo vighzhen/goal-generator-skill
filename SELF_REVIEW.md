@@ -1310,6 +1310,40 @@
 
 修复 0 个问题，新增 1 个功能。验证已执行：`PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile scripts/generate_goal.py scripts/batch_generate.py`、`python3 scripts/batch_generate.py --help` 断言包含 `--max-task-count`、3 任务清单 `--dry-run --max-task-count 3` 通过、3 任务清单 `--dry-run --max-task-count 2` 返回失败并断言“任务数量超限”、`--filter task-1 --max-task-count 1` 通过、`--limit 1 --max-task-count 1` 通过、`--list-tasks --max-task-count 2` 返回失败、`--max-task-count -1` 参数错误、`--lint-defaults-json --max-task-count 1` 与 `--lint-task-schema --max-task-count 1` 无效组合返回参数错误、`python3 scripts/generate_goal.py --analyze '给项目加单元测试'`、`python3 scripts/batch_generate.py examples/sample_tasks.json --dry-run`、完整 `--generate` 端到端生成并用 `--lint-goal-file` 复核通过、`git diff --check`。
 
+## 第 39 轮
+
+### 审查清单
+
+#### 问题（A）
+
+| 序号 | 优先级 | 文件 | 问题描述 | 处理状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| - | - | scripts/generate_goal.py、scripts/batch_generate.py、SKILL.md、README.md、assets/goal_template.txt、references/elements.md、references/anti_laziness.md | 已按第 39 轮要求重新通读全部 7 个范围内文件（generate_goal.py 2982 行 sha256 0b3c1edd6f74c4dd、batch_generate.py 3977 行 sha256 52f31f4f31199ace、SKILL.md 144 行 sha256 adb45c12f0e77469、README.md 526 行 sha256 3b413999984a4a19、goal_template.txt 33 行 sha256 9735794e70c017a1、elements.md 211 行 sha256 16d7190a4bc403c7、anti_laziness.md 158 行 sha256 b5205abf3c6e0a71），并复核第 38 轮任务数量上限门禁、filter/limit 后任务集合为空的行为和批量分析/生成主流程；未发现新的 P0/P1 缺陷，本轮直接投入能力增强。 | 无需修复 | - |
+
+#### 能力增强点（B）
+
+| 序号 | 功能名称 | 解决的痛点 | 实现方案 | 状态 | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 批量非空任务集门禁 | 当用户写错 `--filter`、输入清单为空或上游导出异常时，当前命令可能成功处理 0 个任务并返回 0，CI 容易误判为批量生成/检查成功；`--max-task-count` 只限制上限，不能表达“至少要命中一个任务”。 | 在 `scripts/batch_generate.py` 新增 `--require-non-empty`，在任务读取、filter、sort、limit 后检查当前任务集是否为空；为空时在进入生成/分析前失败并提示检查输入、`--filter` 或 `--limit`。该门禁适用于读取任务清单的批量模式，不用于不读取任务清单的默认值检查或原始 Schema 检查；与 `--max-task-count 0` 组合时参数错误。同步更新 README 与 SKILL。 | 待实现 | - |
+
+#### 去重审查
+
+| 拟新增功能 | 最相似的已有功能 | 本质区别 | 审查结果 |
+| --- | --- | --- | --- |
+| 批量非空任务集门禁 | `--max-task-count` | 第 38 轮门禁限制任务数量上限；新功能限制任务数量下限，防止空结果被误认为成功。 | 通过 |
+| 批量非空任务集门禁 | `--filter` | `--filter` 只负责筛选任务；新功能在筛选结果为空时失败，暴露筛选条件错误或空输入。 | 通过 |
+| 批量非空任务集门禁 | `--fail-on-skipped` | `--fail-on-skipped` 只在存在跳过任务时失败；新功能在没有任何待处理任务时失败，即使没有跳过项也能阻断。 | 通过 |
+
+#### 功能价值自检
+
+| 功能名称 | 解决什么场景 | 没有它用户怎么做 | 有了它改善在哪 | 与已有功能的本质区别 | 自检结果 |
+| --- | --- | --- | --- | --- | --- |
+| 批量非空任务集门禁 | CI 或脚本要求本次批量检查/生成必须实际命中至少一个任务，避免空清单、错 filter 或上游导出异常被当作成功。 | 先运行 `--list-tasks` 人工确认数量，或写外部脚本解析摘要中的“成功 0 个”。 | 一条命令把空任务集转为失败退出，并在写出任何正文前提醒检查输入范围，减少静默漏处理。 | 这是任务集合下限准入门禁，不是上限门禁、筛选、跳过项检查或展示格式变化。 | 达标 |
+
+### 本轮总结
+
+进行中：已完成第 39 轮审查清单提交前准备，待实现 1 个能力增强。
+
 ## 用户纠正记录
 
 | 时间 | 纠正内容 | 执行结果 | Commit |
@@ -1318,7 +1352,7 @@
 
 ## 最终总结
 
-进行中：本分支为 `optimize/self-evolve-v5`，第 38 轮已完成，准备进入第 39 轮；累计修复 4 个已完成问题，新增 38 个已完成能力，用户纠正 0 次。
+进行中：本分支为 `optimize/self-evolve-v5`，第 39 轮审查已完成，准备实现批量非空任务集门禁；累计修复 4 个已完成问题，新增 38 个已完成能力，用户纠正 0 次。
 能力饱和状态：否。
 新增能力清单：
 - 第 1 轮：代码路径上下文画像（befb48f）
