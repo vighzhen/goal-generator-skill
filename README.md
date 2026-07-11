@@ -404,6 +404,9 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 # 所有任务写入同一个文件
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt
 
+# 交付目标必填门禁：真实生成必须显式写入 output-file 或 output-dir，避免只落在 stdout 日志
+python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-file all_goals.txt --require-output-target
+
 # 输出覆盖保护：目标正文文件、输出目录内将生成的 .txt 或 JSON 报告已存在时失败且不写入
 python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-dir output/ --report-json batch_report.json --no-overwrite
 ```
@@ -416,6 +419,7 @@ python3 scripts/batch_generate.py --input examples/sample_tasks.json --output-di
 - JSON/CSV 任务可选 `path`、`inspect_path` 或 `target_path` 字段；`--inspect-paths` 会逐任务扫描对应本地文件或目录，输出 `language_counts`、`verification_hints`、`risk_flags`、`suggested_fields` 和路径错误，并在任一路径缺失或不可读时退出码为 1；`--enrich-from-paths` 会把路径画像中的 `suggested_fields` 回填到缺失或仅由描述启发式推断的 6 要素，不覆盖用户显式填写的字段。
 - `--lint-task-schema` 不生成 `/goal` 正文，而是直接检查原始 JSON/CSV 任务清单结构；会报告未知任务字段、未知 `fields` 6 要素、非对象 `fields`、CSV 未知或重复表头、`description` 缺失或为空、`path`/`inspect_path`/`target_path` 以及 `depends_on`/`dependencies` 别名冲突等问题，任一问题都会返回非零退出码，并可配合 `--output-file`、`--summary-only` 和 `--report-json` 接入 CI。
 - `--output-dir` 和 `--output-file` 互斥。
+- `--require-output-target` 可用于真实批量生成或 `--lint-output`，要求必须指定 `--output-file` 或 `--output-dir`；如果只会把正文输出到 stdout，则在读取/生成前失败，适合 CI 或发布脚本要求交付物必须落盘的场景。该门禁不用于 `--dry-run`、`--check` 或分析模式。
 - `--no-overwrite` 可用于真实生成、`--dry-run`、`--check` 或 `--lint-output` 的批量输出写入前保护；如果 `--output-file`、`--output-dir` 内本次将生成的 `.txt` 文件或 `--report-json` 已存在，或多个输出目标指向同一路径，命令会在写入任何输出文件前失败，适合 CI 和多人协作中保护历史交付物。该门禁不用于 `--questions`、`--profile-tasks`、`--lint-task-schema` 等分析模式。
 - `--max-task-count <N>` 会在任务读取、`--filter`、`--sort-by` 和 `--limit` 后检查当前将处理的任务数量；超过阈值时直接失败，不会像 `--limit` 一样自动截断，适合防止 CI、机器人导出或多人合并时意外生成过大的任务批次。该门禁适用于读取任务清单的批量模式，不用于 `--lint-defaults-json` 或 `--lint-task-schema`。
 - `--require-non-empty` 会在任务读取、`--filter`、`--sort-by` 和 `--limit` 后要求至少保留 1 个任务；如果任务集为空会直接失败，适合在 CI 中防止空清单或错误筛选条件被当作成功。该门禁不用于 `--lint-defaults-json` 或 `--lint-task-schema`，也不能与 `--max-task-count 0` 同用。
@@ -517,6 +521,7 @@ CSV 补充文件至少包含 `name` 表头，可选 `supplement`、`answer`、`r
 - 批量任务数量上限门禁
 - 批量非空任务集门禁
 - 批量任务清单 Schema 门禁（未知字段、重复表头、description 缺失和别名冲突）
+- 批量交付目标必填门禁
 - 批量输出覆盖保护门禁
 - 团队默认值 JSON 语义质量门禁
 - 批量任务 6 要素字段语义质量门禁

@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         max_defaulted_fields = _max_defaulted_fields_from_args(args)
         max_task_count = _max_task_count_from_args(args)
         require_non_empty = _require_non_empty_from_args(args)
+        _require_output_target_from_args(args)
         required_explicit_fields = _required_explicit_fields_from_args(args)
         forbidden_default_fields = _forbidden_default_fields_from_args(args)
         require_task_path = _require_task_path_from_args(args)
@@ -419,6 +420,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="写入 --output-file、--output-dir 目标文件或 --report-json 前要求目标不存在，避免覆盖已有批量产物。",
     )
+    parser.add_argument(
+        "--require-output-target",
+        action="store_true",
+        help="真实批量生成或 lint-output 时必须指定 --output-file 或 --output-dir，避免交付物只输出到 stdout。",
+    )
     parser.add_argument("--check", action="store_true", help="校验输入任务文件，等价于 --dry-run --strict --summary-only --fail-on-skipped。")
     parser.add_argument("--lint-fields", action="store_true", help="批量检查任务 6 要素字段的语义质量，不生成 /goal。")
     parser.add_argument("--inspect-paths", action="store_true", help="批量扫描任务 path/inspect_path/target_path 指向的本地路径并输出上下文建议。")
@@ -691,6 +697,30 @@ def _no_overwrite_from_args(args: argparse.Namespace) -> bool:
         or args.list_tasks
     ):
         raise ValueError("--no-overwrite 仅适用于真实批量生成、--dry-run、--check 或 --lint-output")
+    return True
+
+
+def _require_output_target_from_args(args: argparse.Namespace) -> bool:
+    if not args.require_output_target:
+        return False
+    if (
+        args.lint_defaults_json
+        or args.lint_task_schema
+        or args.merge_supplements
+        or args.questions
+        or args.profile_tasks
+        or args.redaction_check
+        or args.lint_fields
+        or args.inspect_paths
+        or args.enrich_from_paths
+        or args.plan_dependencies
+        or args.list_tasks
+        or args.dry_run
+        or args.check
+    ):
+        raise ValueError("--require-output-target 仅适用于真实批量生成或 --lint-output，不能与分析、dry-run 或 check 模式同用")
+    if not (args.output_file or args.output_dir):
+        raise ValueError("--require-output-target 要求指定 --output-file 或 --output-dir，避免真实批量生成只输出到 stdout")
     return True
 
 
